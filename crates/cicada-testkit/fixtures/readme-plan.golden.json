@@ -1,0 +1,53 @@
+{
+  "apiVersion": "cicada/plan-v1",
+  "calendar": "work",
+  "generatedAt": "2026-10-23T01:00:00Z",
+  "ops": [
+    {
+      "kind": "create",
+      "desired": {
+        "id": "standup",
+        "summary": "Daily Standup",
+        "time": {
+          "span": {
+            "start": {
+              "wall": {
+                "local": "1970-01-01T09:00:00",
+                "zone": "America/Sao_Paulo"
+              }
+            },
+            "duration": "PT30M"
+          }
+        },
+        "recurrence": {
+          "freq": "WEEKLY",
+          "interval": 1,
+          "byDay": [
+            "MO",
+            "TU",
+            "WE",
+            "TH",
+            "FR"
+          ]
+        },
+        "attendees": [
+          {
+            "email": "alice@x.com",
+            "required": true,
+            "status": "needsAction"
+          }
+        ],
+        "reminders": [
+          {
+            "kind": "popup",
+            "offset": "PT10M"
+          }
+        ],
+        "conferencing": "meet",
+        "transparency": "opaque"
+      },
+      "hash": "sha256:7b7b07fa12d91ead939e52a5517cccc8d7b623d484e2dd3b2a08b6748dab91b8"
+    }
+  ],
+  "warnings": []
+}

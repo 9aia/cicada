@@ -1,0 +1,150 @@
+[
+  {
+    "description": "List the calendars declared in the manifest (names, timeZone, provider binding, declared event counts, recorded state counts). Desired state lives in YAML — to change events, edit the calendar files then call cicada.plan.preview / cicada.plan.apply. There is no events.create (ADR-0002 §10).",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "name": "cicada.calendar.list",
+    "readOnlyHint": true
+  },
+  {
+    "description": "Expand declared (or live, with `live: true`) events into concrete occurrences inside [from, to). Read-only.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "calendar": {
+          "description": "Limit to one declared calendar name; default all.",
+          "type": "string"
+        },
+        "from": {
+          "description": "Window start: `today`, `+Nd`, `+Nw`, a date (2026-08-19), a civil datetime, or an RFC 3339 instant. Resolved in each calendar's timeZone.",
+          "type": "string"
+        },
+        "live": {
+          "description": "Expand the provider's live events instead of the desired YAML. Default false.",
+          "type": "boolean"
+        },
+        "to": {
+          "description": "Window end (exclusive), same grammar as `from`.",
+          "type": "string"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "name": "cicada.events.range",
+    "readOnlyHint": true
+  },
+  {
+    "description": "Show one declared event by stable local id: its fields plus occurrences inside a window. Read-only.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "description": "Window start: `today`, `+Nd`, `+Nw`, a date (2026-08-19), a civil datetime, or an RFC 3339 instant. Resolved in each calendar's timeZone.",
+          "type": "string"
+        },
+        "id": {
+          "description": "Stable local event id (e.g. `standup`).",
+          "type": "string"
+        },
+        "to": {
+          "description": "Window end (exclusive), same grammar as `from`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "cicada.events.show",
+    "readOnlyHint": true
+  },
+  {
+    "description": "Compare recorded state against live provider state — reports managed events that are missing or modified remotely (ADR-0002 §4). Read-only.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "name": "cicada.state.drift",
+    "readOnlyHint": true
+  },
+  {
+    "description": "Pull live provider state into recorded state for every managed calendar — reconciles recorded state after out-of-band edits so the next plan sees live truth. Writes only the local state file (under its advisory lock); no remote mutations.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "name": "cicada.state.refresh",
+    "readOnlyHint": false
+  },
+  {
+    "description": "Dry-run: diff declared YAML vs recorded vs live into a `cicada/plan-v1` document per calendar. Returns a `planDigest` identifying this preview — pass it to cicada.plan.apply to execute. Always safe; never mutates anything.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "notify": {
+          "description": "Attendee-notification policy override (ADR-0002 §5); default each calendar's spec.apply.sendUpdates.",
+          "enum": [
+            "none",
+            "externalOnly",
+            "all"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "name": "cicada.plan.preview",
+    "readOnlyHint": true
+  },
+  {
+    "description": "Execute a previewed plan against the provider — GATED: requires `confirm: true` AND a `planDigest` returned by cicada.plan.preview in this session. The server re-plans before applying; a digest that no longer matches (YAML/live/recorded changed since preview) is rejected as stale. Runs under the state file lock; mutating ops are never implicit (ADR-0001 §8a).",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "confirm": {
+          "description": "Must be true — explicit user approval to mutate.",
+          "type": "boolean"
+        },
+        "force": {
+          "description": "Overwrite out-of-band edits instead of failing on drift conflict (ADR-0002 §4).",
+          "type": "boolean"
+        },
+        "notify": {
+          "description": "Attendee-notification policy override (ADR-0002 §5); must match the preview's choice or the digest goes stale.",
+          "enum": [
+            "none",
+            "externalOnly",
+            "all"
+          ],
+          "type": "string"
+        },
+        "planDigest": {
+          "description": "Digest from cicada.plan.preview in this session.",
+          "type": "string"
+        },
+        "resume": {
+          "description": "Skip ops already journaled as applied (crash resume, ADR-0001 §4).",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "planDigest",
+        "confirm"
+      ],
+      "type": "object"
+    },
+    "name": "cicada.plan.apply",
+    "readOnlyHint": false
+  }
+]
