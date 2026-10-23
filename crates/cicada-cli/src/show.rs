@@ -4,13 +4,16 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use cicada_core::application::{ShowEvent, default_window};
+use cicada_core::application::{QueryRange, ShowEvent, default_window};
 use cicada_core::domain::event::{Event, EventTime};
 use cicada_core::domain::ids::{LocalId, ZoneId};
 use cicada_core::domain::time::{Time, TimeRange};
+use cicada_core::ports::{CalendarProvider, StateStore};
+use cicada_state::JsonFileStateStore;
 
 use crate::ShowArgs;
 use crate::range::occurrence_line;
+use cicada_shell::backend;
 use cicada_shell::input;
 use cicada_shell::timeparse::parse_bound;
 
@@ -22,6 +25,9 @@ const OCCURRENCE_CAP: usize = 20;
 
 /// Run the verb.
 pub(crate) fn run(args: &ShowArgs) -> ExitCode {
+    if args.provider.is_some() {
+        return run_live(args);
+    }
     let files = match input::resolve_calendar_files(Path::new("."), &args.files) {
         Ok(f) => f,
         Err(e) => {
@@ -149,4 +155,152 @@ fn render_event_time(time: &EventTime) -> String {
             Err(_) => start,
         },
     }
+}
+
+/// `show --provider <name>` — the live view: resolve the event by
+/// its `cicada:id` tag on each declared calendar's remote binding
+/// (first hit wins), then expand its remote rule.
+fn run_live(args: &ShowArgs) -> ExitCode {
+    let provider_name = match backend::provider_name(args.provider.as_deref(), "show") {
+        Ok(n) => n,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let files = match input::resolve_calendar_files(Path::new("."), &args.files) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("cicada show: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let calendars = match input::load_calendars(&files) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("cicada show: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let dir = backend::manifest_dir(Path::new("."), &args.files);
+    let provider = match backend::provider(&provider_name, None, &dir, "show") {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let runtime = match backend::runtime("show") {
+        Ok(rt) => rt,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let store = JsonFileStateStore::new(cicada_state::resolve_state_path(&dir, None));
+    let state = runtime
+        .block_on(store.load())
+        .unwrap_or_else(|_| cicada_core::domain::state::RecordedState::new());
+
+    let id = LocalId::new(args.id.as_str());
+    let mut found = None;
+    for cal in &calendars {
+        let remote = backend::remote_calendar(cal, state.calendar(&cal.name));
+        match runtime.block_on(provider.find_by_tag(&remote, &id)) {
+            Ok(Some(event)) => {
+                found = Some((cal, remote, event));
+                break;
+            }
+            Ok(None) => {}
+            Err(e) => {
+                eprintln!("cicada show {}: {e}", cal.name);
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    let Some((cal, remote, live)) = found else {
+        eprintln!(
+            "cicada show: no live event tagged {id:?} on the declared \
+             calendars ({provider_name})"
+        );
+        return ExitCode::FAILURE;
+    };
+    let window = match window(args, &cal.time_zone) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("cicada show: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let event = Event::new(id.clone(), live.body.clone());
+    let occurrences = QueryRange::new().expand_remote(std::slice::from_ref(&live), window);
+    match occurrences {
+        Ok(occs) => {
+            println!(
+                "{} — \"{}\" (live @ {remote}; remote {} etag {})",
+                id,
+                live.body.summary,
+                live.remote_id,
+                live.etag.as_deref().unwrap_or("—")
+            );
+            if let Some(updated) = &live.updated {
+                println!("  updated: {updated}");
+            }
+            print_body_lines(&event);
+            println!("occurrences:");
+            for occ in occs.iter().take(OCCURRENCE_CAP) {
+                println!("  {}", occurrence_line(occ));
+            }
+            if occs.is_empty() && live.body.recurrence.is_none() {
+                println!("  (outside the window — widen --from/--to)");
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("cicada show {id}: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The detail lines shared by the live view (`when`/`repeat`/…).
+fn print_body_lines(event: &Event) {
+    println!("  when:    {}", render_event_time(&event.time));
+    if let Some(rule) = &event.recurrence {
+        println!("  repeat:  {}", rule.describe());
+    }
+    if let Some(d) = &event.description {
+        println!("  desc:    {d}");
+    }
+    if let Some(l) = &event.location {
+        println!("  where:   {l}");
+    }
+    if !event.attendees.is_empty() {
+        let who = event
+            .attendees
+            .iter()
+            .map(|a| {
+                if a.required {
+                    a.email.clone()
+                } else {
+                    format!("{} (optional)", a.email)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!("  who:     {who}");
+    }
+    if !event.reminders.is_empty() {
+        let what = event
+            .reminders
+            .iter()
+            .map(|r| format!("{} {:?}", r.kind, r.offset))
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!("  remind:  {what}");
+    }
+    if let Some(c) = &event.conferencing {
+        println!("  conf:    {c}");
+    }
+    println!("  busy:    {}", event.transparency);
 }

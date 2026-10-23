@@ -6,8 +6,11 @@
 
 mod apply;
 mod drift;
+mod fmt;
+mod init;
 mod logging;
 mod plan;
+mod provider;
 mod range;
 mod refresh;
 mod show;
@@ -35,7 +38,7 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Commands {
     /// Scaffold a cicada.yaml manifest and a starter calendar.
-    Init,
+    Init(InitArgs),
     /// Validate calendar YAML: schema shape plus domain invariants.
     ///
     /// With no files, discovers the `cicada.yaml` manifest in the
@@ -60,6 +63,16 @@ enum Commands {
     Provider(ProviderArgs),
     /// Serve MCP over stdio — the same core, for agents (ADR-0001 §8a).
     Mcp(cicada_mcp::ServerOptions),
+}
+
+/// `cicada init`.
+#[derive(Debug, Args)]
+struct InitArgs {
+    /// Directory to scaffold into (default: current directory).
+    dir: Option<PathBuf>,
+    /// Overwrite existing `cicada.yaml` / `calendars/work.yaml`.
+    #[arg(long)]
+    force: bool,
 }
 
 /// `cicada validate [files...]`.
@@ -167,8 +180,8 @@ struct RangeArgs {
     /// Range end (`+7d`, a date, or a datetime).
     #[arg(long)]
     to: Option<String>,
-    /// Expand the live provider's rules instead of local YAML
-    /// (reserved — not wired yet).
+    /// Expand the live provider's events instead of local YAML
+    /// (fake | google).
     #[arg(long)]
     provider: Option<String>,
 }
@@ -188,6 +201,10 @@ struct ShowArgs {
     /// Occurrence window end (defaults to the window start + 30d).
     #[arg(long)]
     to: Option<String>,
+    /// Show the live provider's version of the event (found via its
+    /// `cicada:id` tag) instead of the declared YAML.
+    #[arg(long)]
+    provider: Option<String>,
 }
 
 /// `cicada fmt`.
@@ -195,6 +212,13 @@ struct ShowArgs {
 struct FmtArgs {
     /// Files to format; defaults to the manifest's calendars.
     files: Vec<PathBuf>,
+    /// Check only — exit nonzero when a file isn't canonical; writes
+    /// nothing (CI-friendly).
+    #[arg(long)]
+    check: bool,
+    /// Sort events by stable id instead of preserving file order.
+    #[arg(long)]
+    sort: bool,
 }
 
 /// `cicada provider`.
@@ -211,6 +235,21 @@ enum ProviderCommands {
     Add {
         /// Provider name (`google`).
         name: String,
+        /// Register a service-account key JSON instead of running the
+        /// OAuth flow (non-interactive).
+        #[arg(long, value_name = "KEY_JSON")]
+        service_account: Option<PathBuf>,
+        /// OAuth installed-app client id (else
+        /// `CICADA_GOOGLE_CLIENT_ID`).
+        #[arg(long)]
+        client_id: Option<String>,
+        /// OAuth installed-app client secret (else
+        /// `CICADA_GOOGLE_CLIENT_SECRET`).
+        #[arg(long)]
+        client_secret: Option<String>,
+        /// Authorization code — skips the interactive prompt.
+        #[arg(long)]
+        code: Option<String>,
     },
 }
 
@@ -231,15 +270,9 @@ fn main() -> ExitCode {
         Some(Commands::Apply(args)) => apply::run(&args),
         Some(Commands::Refresh(args)) => refresh::run(&args),
         Some(Commands::Drift(args)) => drift::run(&args),
-        Some(Commands::Init) => not_implemented("init"),
-        Some(Commands::Fmt(_)) => not_implemented("fmt"),
-        Some(Commands::Provider(_)) => not_implemented("provider"),
+        Some(Commands::Init(args)) => init::run(&args),
+        Some(Commands::Fmt(args)) => fmt::run(&args),
+        Some(Commands::Provider(args)) => provider::run(&args.command),
         Some(Commands::Mcp(opts)) => cicada_mcp::run_stdio(&opts),
     }
-}
-
-/// Stub for verbs whose use cases land in later build steps.
-fn not_implemented(verb: &str) -> ExitCode {
-    eprintln!("cicada {verb}: not yet implemented");
-    ExitCode::FAILURE
 }

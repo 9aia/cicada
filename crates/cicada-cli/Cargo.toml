@@ -22,6 +22,8 @@ cicada-testkit.workspace = true
 clap.workspace = true
 tokio.workspace = true
 serde_json.workspace = true
+serde_yaml.workspace = true
+url.workspace = true
 jiff.workspace = true
 
 [dev-dependencies]

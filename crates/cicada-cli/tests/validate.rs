@@ -124,19 +124,88 @@ fn missing_file_reports_in_place() {
 }
 
 #[test]
-fn stub_verbs_report_unimplemented() {
+fn init_scaffolds_a_working_project() {
     let dir = tempfile::tempdir().unwrap();
-    for verb in ["init", "fmt"] {
-        let out = cicada(dir.path(), &[verb]);
-        assert!(!out.status.success(), "{verb} should still be a stub");
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(stderr.contains("not yet implemented"), "{verb}: {stderr}");
+    let out = cicada(dir.path(), &["init"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    for path in ["cicada.yaml", "calendars/work.yaml", ".cicada/.gitignore"] {
+        assert!(dir.path().join(path).is_file(), "{path} missing");
     }
-    // The lifecycle verbs are real now — with no manifest they fail
-    // on input, not on unimplemented plumbing.
-    for verb in ["apply", "drift", "refresh"] {
-        let out = cicada(dir.path(), &[verb]);
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(!stderr.contains("not yet implemented"), "{verb}: {stderr}");
+    // The scaffold validates, plans, and is already fmt-canonical.
+    for args in [vec!["validate"], vec!["plan"], vec!["fmt", "--check"]] {
+        let out = cicada(dir.path(), &args);
+        assert!(
+            out.status.success(),
+            "{args:?}: {}\n{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
+    // Re-init refuses to clobber without --force.
+    let out = cicada(dir.path(), &["init"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--force"));
+    let out = cicada(dir.path(), &["init", "--force"]);
+    assert!(out.status.success());
+}
+
+#[test]
+fn provider_add_unknown_provider_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = cicada(dir.path(), &["provider", "add", "caldav"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("unknown provider"));
+}
+
+#[test]
+fn provider_add_service_account_rejects_bad_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let bad = dir.path().join("bad.json");
+    std::fs::write(&bad, r#"{"not": "a key"}"#).unwrap();
+    let out = cicada(
+        dir.path(),
+        &[
+            "provider",
+            "add",
+            "google",
+            "--service-account",
+            bad.to_str().unwrap(),
+        ],
+    );
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("client_email"), "{stderr}");
+}
+
+#[test]
+fn fmt_check_flags_noncanonical_and_fmt_fixes() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("calendars")).unwrap();
+    std::fs::write(
+        dir.path().join("cicada.yaml"),
+        "apiVersion: cicada/v1\nkind: Manifest\ncalendars: [calendars/work.yaml]\n",
+    )
+    .unwrap();
+    // Flow-style fields + wrong order → not canonical.
+    std::fs::write(
+        dir.path().join("calendars/work.yaml"),
+        "apiVersion: cicada/v1\nkind: Calendar\nmetadata:\n  name: work\n  \
+         timeZone: UTC\nspec:\n  events:\n    - id: a\n      summary: A\n      \
+         start: \"2026-01-05T09:00\"\n      duration: 30m\n",
+    )
+    .unwrap();
+    let out = cicada(dir.path(), &["fmt", "--check"]);
+    assert!(!out.status.success(), "expected non-canonical flag");
+    let out = cicada(dir.path(), &["fmt"]);
+    assert!(out.status.success());
+    let out = cicada(dir.path(), &["fmt", "--check"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
 }
