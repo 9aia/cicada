@@ -44,6 +44,10 @@ pub const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 pub const CALENDAR_SCOPE: &str = "https://www.googleapis.com/auth/calendar";
 /// `SecretStore` key holding the OAuth refresh token.
 pub const REFRESH_TOKEN_KEY: &str = "google/refresh-token";
+/// `SecretStore` key holding the service-account key JSON persisted
+/// by `cicada provider add google --service-account`. Read directly
+/// off the [`crate::FileSecretStore`] path — `from_env` stays sync.
+pub const SERVICE_ACCOUNT_KEY: &str = "google/service-account";
 /// Loopback redirect for the installed-app flow (`http://127.0.0.1` —
 /// Google maps any port for installed clients).
 pub const LOOPBACK_REDIRECT: &str = "http://127.0.0.1";
@@ -146,6 +150,25 @@ impl GoogleAuthConfig {
                 client_secret,
                 token_url: var("CICADA_GOOGLE_TOKEN_URL").unwrap_or_else(|| TOKEN_URL.to_owned()),
                 refresh_token: var("CICADA_GOOGLE_REFRESH_TOKEN"),
+            });
+        }
+        // `cicada provider add google --service-account` persists the
+        // key JSON at the SecretStore location — the last-resort
+        // credential source after env. Read it off the
+        // `FileSecretStore` path directly; `from_env` stays sync.
+        let stored_path =
+            crate::secrets::FileSecretStore::default_location().key_path(SERVICE_ACCOUNT_KEY);
+        if let Ok(source) = std::fs::read_to_string(&stored_path) {
+            let key: ServiceAccountKey = serde_json::from_str(&source).map_err(|e| {
+                format!(
+                    "persisted service-account key {} is malformed: {e} — \
+                     fix it or delete the file",
+                    stored_path.display()
+                )
+            })?;
+            return Ok(Self::ServiceAccount {
+                key,
+                subject: var("CICADA_GOOGLE_SUBJECT"),
             });
         }
         Err(format!(

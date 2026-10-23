@@ -42,7 +42,8 @@ pub mod secrets;
 
 pub use auth::{
     AUTHORIZATION_URL, CALENDAR_SCOPE, GoogleAuthConfig, GoogleAuthProvider, REFRESH_TOKEN_KEY,
-    ServiceAccountKey, TOKEN_URL, TokenExchange, authorization_url, default_secrets_dir,
+    SERVICE_ACCOUNT_KEY, ServiceAccountKey, TOKEN_URL, TokenExchange, authorization_url,
+    default_secrets_dir,
 };
 pub use http::ReqwestHttp;
 pub use provider::GoogleCalendarProvider;
