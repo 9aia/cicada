@@ -126,10 +126,17 @@ fn missing_file_reports_in_place() {
 #[test]
 fn stub_verbs_report_unimplemented() {
     let dir = tempfile::tempdir().unwrap();
-    for verb in ["apply", "drift", "refresh"] {
+    for verb in ["init", "fmt"] {
         let out = cicada(dir.path(), &[verb]);
         assert!(!out.status.success(), "{verb} should still be a stub");
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(stderr.contains("not yet implemented"), "{verb}: {stderr}");
+    }
+    // The lifecycle verbs are real now — with no manifest they fail
+    // on input, not on unimplemented plumbing.
+    for verb in ["apply", "drift", "refresh"] {
+        let out = cicada(dir.path(), &[verb]);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!stderr.contains("not yet implemented"), "{verb}: {stderr}");
     }
 }

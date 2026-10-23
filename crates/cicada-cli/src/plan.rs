@@ -2,11 +2,10 @@
 //! an optional `cicada/plan-v1` JSON document (ADR-0002 §11).
 //!
 //! Provider selection: `--provider fake` (the default) plans against
-//! the in-memory [`FakeCalendarProvider`]; `--provider google` is the
-//! next build step. Recorded state is in-memory/empty for now — the
-//! `cicada-state` adapter lands with apply — so a live calendar
-//! produces all-`Create` plans, which is exactly right for a first
-//! run.
+//! the file-backed [`FakeFileProvider`]; `--provider google` is the
+//! next build step. Recorded state loads from `.cicada/state.yaml`
+//! via [`JsonFileStateStore`] — absent means first-run, all-`Create`
+//! plans.
 
 use std::fmt::Write as _;
 use std::fs;
@@ -14,29 +13,25 @@ use std::process::ExitCode;
 
 use cicada_core::application::{PlanCalendar, PlanRequest};
 use cicada_core::domain::operation::{EventDiff, OpKind, Operation};
-use cicada_core::domain::policy::SendUpdates;
-use cicada_core::domain::state::RecordedState;
 use cicada_core::domain::time::Time;
 use cicada_core::planning::{Plan, Severity};
-use cicada_core::ports::CalendarRef;
 use cicada_core::ports::clock::SystemClock;
-use cicada_testkit::FakeCalendarProvider;
+use cicada_state::JsonFileStateStore;
 
 use crate::PlanArgs;
+use crate::backend;
 use crate::input;
 
 /// Run the verb; exit `FAILURE` on load/plan errors or when any plan
 /// carries error-severity findings (apply would refuse it anyway).
 pub(crate) fn run(args: &PlanArgs) -> ExitCode {
-    let provider_name = args.provider.as_deref().unwrap_or("fake");
-    if provider_name == "google" {
-        eprintln!("cicada plan: the google provider is not implemented yet — use --provider fake");
-        return ExitCode::FAILURE;
-    }
-    if provider_name != "fake" {
-        eprintln!("cicada plan: unknown provider {provider_name:?} (supported: fake, google)");
-        return ExitCode::FAILURE;
-    }
+    let provider_name = match backend::provider_name(args.provider.as_deref(), "plan") {
+        Ok(n) => n,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::FAILURE;
+        }
+    };
     let files = match input::resolve_calendar_files(&args.files) {
         Ok(f) if f.is_empty() => {
             eprintln!("cicada plan: no calendar files found");
@@ -55,53 +50,48 @@ pub(crate) fn run(args: &PlanArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let runtime = match tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(rt) => rt,
+    let dir = backend::manifest_dir(&args.files);
+    let state_path = cicada_state::resolve_state_path(&dir, args.state.as_deref());
+    let store = JsonFileStateStore::new(&state_path);
+    let provider = match backend::fake_provider(args.fake_file.as_deref(), &dir, "plan") {
+        Ok(p) => p,
         Err(e) => {
-            eprintln!("cicada plan: cannot start runtime: {e}");
+            eprintln!("{e}");
             return ExitCode::FAILURE;
         }
     };
-
-    let provider = FakeCalendarProvider::new();
-    // The real StateStore adapter is a later build step — plan runs
-    // against an empty recorded state for now (all-Create on a live
-    // calendar, which is the correct first-run semantics).
-    let state = RecordedState::new();
+    let runtime = match backend::runtime("plan") {
+        Ok(rt) => rt,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let state = match runtime.block_on(cicada_core::ports::StateStore::load(&store)) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("cicada plan: cannot load {}: {e}", state_path.display());
+            return ExitCode::FAILURE;
+        }
+    };
     let clock = SystemClock;
 
     let mut plans = Vec::new();
     let mut failed = false;
     for cal in &calendars {
         let recorded = state.calendar(&cal.name);
-        let remote = CalendarRef::new(
-            cal.provider_calendar_id
-                .clone()
-                .or_else(|| {
-                    recorded.and_then(|r| {
-                        if r.calendar_id.is_empty() {
-                            None
-                        } else {
-                            Some(r.calendar_id.clone())
-                        }
-                    })
-                })
-                .unwrap_or_else(|| "primary".to_owned()),
-        );
+        let remote = backend::remote_calendar(cal, recorded);
         let req = PlanRequest {
             desired: cal,
             recorded,
             provider: &provider,
             remote_calendar: &remote,
             clock: &clock,
-            send_updates: SendUpdates::default(),
+            send_updates: cal.send_updates,
         };
         match runtime.block_on(PlanCalendar::new().run(&req)) {
             Ok(plan) => {
-                print_plan(&plan, provider_name, remote.as_str());
+                print_plan(&plan, &provider_name, remote.as_str());
                 plans.push(plan);
             }
             Err(e) => {
@@ -137,8 +127,9 @@ fn write_plans(plans: &[Plan], out: &std::path::Path) -> Result<(), String> {
 }
 
 /// Pretty-print one plan: per-op lines with diffs, the drift
-/// summary, findings, and a count line.
-fn print_plan(plan: &Plan, provider: &str, remote: &str) {
+/// summary, findings, and a count line. `pub(crate)` — `apply`
+/// shows the same plan it executes.
+pub(crate) fn print_plan(plan: &Plan, provider: &str, remote: &str) {
     println!(
         "calendar {} (provider: {provider} · calendar: {remote}) — generated {}",
         plan.calendar, plan.generated_at

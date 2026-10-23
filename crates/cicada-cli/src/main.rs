@@ -4,10 +4,14 @@
 
 #![forbid(unsafe_code)]
 
+mod apply;
+mod backend;
+mod drift;
 mod input;
 mod logging;
 mod plan;
 mod range;
+mod refresh;
 mod show;
 mod timeparse;
 mod validate;
@@ -46,9 +50,9 @@ enum Commands {
     /// Reconcile: execute the plan against the provider.
     Apply(ApplyArgs),
     /// Pull live state into recorded state.
-    Refresh,
+    Refresh(RefreshArgs),
     /// Show recorded-vs-live drift.
-    Drift,
+    Drift(DriftArgs),
     /// Expand events over a time range (local; --provider for live).
     Range(RangeArgs),
     /// Show one event by stable local id.
@@ -78,6 +82,14 @@ struct PlanArgs {
     /// Provider adapter to plan against (fake | google).
     #[arg(long)]
     provider: Option<String>,
+    /// Fake provider backend file (test/demo only; default
+    /// `.cicada/fake-provider.json` beside the manifest).
+    #[arg(long)]
+    fake_file: Option<PathBuf>,
+    /// Recorded-state file (default `.cicada/state.yaml` beside the
+    /// manifest; `CICADA_STATE` also overrides).
+    #[arg(long)]
+    state: Option<PathBuf>,
     /// Write the plan JSON here (`cicada/plan-v1`); a JSON array when
     /// more than one calendar is planned.
     #[arg(long)]
@@ -87,6 +99,20 @@ struct PlanArgs {
 /// `cicada apply`.
 #[derive(Debug, Args)]
 struct ApplyArgs {
+    /// Calendar or manifest YAML files. Defaults to the `cicada.yaml`
+    /// manifest in the current directory.
+    files: Vec<PathBuf>,
+    /// Provider adapter to apply against (fake | google).
+    #[arg(long)]
+    provider: Option<String>,
+    /// Fake provider backend file (test/demo only; default
+    /// `.cicada/fake-provider.json` beside the manifest).
+    #[arg(long)]
+    fake_file: Option<PathBuf>,
+    /// Recorded-state file (default `.cicada/state.yaml`; also
+    /// `CICADA_STATE`).
+    #[arg(long)]
+    state: Option<PathBuf>,
     /// Skip the confirmation prompt.
     #[arg(long)]
     auto_approve: bool,
@@ -100,6 +126,36 @@ struct ApplyArgs {
     /// Attendee notifications: none | externalOnly | all.
     #[arg(long)]
     notify: Option<String>,
+}
+
+/// `cicada refresh`.
+#[derive(Debug, Args)]
+struct RefreshArgs {
+    /// Provider adapter to refresh from (fake | google).
+    #[arg(long)]
+    provider: Option<String>,
+    /// Fake provider backend file (test/demo only).
+    #[arg(long)]
+    fake_file: Option<PathBuf>,
+    /// Recorded-state file (default `.cicada/state.yaml`; also
+    /// `CICADA_STATE`).
+    #[arg(long)]
+    state: Option<PathBuf>,
+}
+
+/// `cicada drift`.
+#[derive(Debug, Args)]
+struct DriftArgs {
+    /// Provider adapter to check against (fake | google).
+    #[arg(long)]
+    provider: Option<String>,
+    /// Fake provider backend file (test/demo only).
+    #[arg(long)]
+    fake_file: Option<PathBuf>,
+    /// Recorded-state file (default `.cicada/state.yaml`; also
+    /// `CICADA_STATE`).
+    #[arg(long)]
+    state: Option<PathBuf>,
 }
 
 /// `cicada range`.
@@ -175,10 +231,10 @@ fn main() -> ExitCode {
         Some(Commands::Plan(args)) => plan::run(&args),
         Some(Commands::Range(args)) => range::run(&args),
         Some(Commands::Show(args)) => show::run(&args),
+        Some(Commands::Apply(args)) => apply::run(&args),
+        Some(Commands::Refresh(args)) => refresh::run(&args),
+        Some(Commands::Drift(args)) => drift::run(&args),
         Some(Commands::Init) => not_implemented("init"),
-        Some(Commands::Apply(_)) => not_implemented("apply"),
-        Some(Commands::Refresh) => not_implemented("refresh"),
-        Some(Commands::Drift) => not_implemented("drift"),
         Some(Commands::Fmt(_)) => not_implemented("fmt"),
         Some(Commands::Provider(_)) => not_implemented("provider"),
         Some(Commands::Mcp) => not_implemented("mcp"),

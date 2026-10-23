@@ -14,9 +14,11 @@
 #![forbid(unsafe_code)]
 
 pub mod clock;
+pub mod file_provider;
 pub mod provider;
 pub mod state;
 
 pub use clock::FakeClock;
-pub use provider::FakeCalendarProvider;
+pub use file_provider::FakeFileProvider;
+pub use provider::{FakeCalendarProvider, FakeSnapshot};
 pub use state::MemoryStateStore;

@@ -28,6 +28,7 @@ use cicada_core::domain::recurrence::RecurrenceExpander;
 use cicada_core::domain::time::TimeRange;
 use cicada_core::ports::{CalendarProvider, CalendarRef, EventTags, RemoteEvent};
 use jiff::Timestamp;
+use serde::{Deserialize, Serialize};
 
 /// In-memory provider. One instance can host many remote calendars.
 #[derive(Debug)]
@@ -176,6 +177,46 @@ impl FakeCalendarProvider {
             .map_or_else(Vec::new, |events| events.values().cloned().collect())
     }
 
+    /// Export the whole backend as a serializable [`FakeSnapshot`] —
+    /// `FakeFileProvider` persists this between CLI invocations.
+    pub fn snapshot(&self) -> FakeSnapshot {
+        let inner = self.lock();
+        let mut idempotency: BTreeMap<String, BTreeMap<String, RemoteId>> = BTreeMap::new();
+        for ((calendar, key), remote_id) in &inner.idempotency {
+            idempotency
+                .entry(calendar.clone())
+                .or_default()
+                .insert(key.clone(), remote_id.clone());
+        }
+        FakeSnapshot {
+            api_version: FakeSnapshot::API_VERSION.to_owned(),
+            calendars: inner.calendars.clone(),
+            idempotency,
+            next_remote: inner.next_remote,
+            next_etag: inner.next_etag,
+        }
+    }
+
+    /// Rebuild a fake from a [`FakeSnapshot`] — `capabilities` are
+    /// not persisted (they're adapter claims, not state).
+    pub fn restore(capabilities: ProviderCapabilities, snapshot: FakeSnapshot) -> Self {
+        let mut idempotency = BTreeMap::new();
+        for (calendar, entries) in snapshot.idempotency {
+            for (key, remote_id) in entries {
+                idempotency.insert((calendar.clone(), key), remote_id);
+            }
+        }
+        Self {
+            capabilities,
+            inner: Mutex::new(Inner {
+                calendars: snapshot.calendars,
+                idempotency,
+                next_remote: snapshot.next_remote,
+                next_etag: snapshot.next_etag,
+            }),
+        }
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
         // Poisoning means a test panicked mid-mutation; recovering
         // the data is still the most useful behavior for a fake.
@@ -186,6 +227,52 @@ impl FakeCalendarProvider {
 }
 
 impl Default for FakeCalendarProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The whole fake backend, serializable — `FakeFileProvider`
+/// persists this to a JSON file so the CLI's apply/drift/refresh
+/// lifecycle survives across processes (test/demo only).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FakeSnapshot {
+    /// Format version — always [`FakeSnapshot::API_VERSION`].
+    pub api_version: String,
+    /// `calendarId → remoteId → event`.
+    #[serde(default)]
+    pub calendars: BTreeMap<String, BTreeMap<RemoteId, RemoteEvent>>,
+    /// `calendarId → idempotencyKey → remoteId` — the request dedupe
+    /// map (tuple keys don't serialize as JSON object keys, so it
+    /// nests instead).
+    #[serde(default)]
+    pub idempotency: BTreeMap<String, BTreeMap<String, RemoteId>>,
+    /// Remote id counter (`fake-N`).
+    #[serde(default)]
+    pub next_remote: u64,
+    /// ETag counter (`etag-N`).
+    #[serde(default)]
+    pub next_etag: u64,
+}
+
+impl FakeSnapshot {
+    /// The only snapshot format version written.
+    pub const API_VERSION: &'static str = "cicada/fake-provider-v1";
+
+    /// An empty, correctly-versioned snapshot.
+    pub fn new() -> Self {
+        Self {
+            api_version: Self::API_VERSION.to_owned(),
+            calendars: BTreeMap::new(),
+            idempotency: BTreeMap::new(),
+            next_remote: 0,
+            next_etag: 0,
+        }
+    }
+}
+
+impl Default for FakeSnapshot {
     fn default() -> Self {
         Self::new()
     }

@@ -1,0 +1,97 @@
+//! `cicada drift` — recorded-vs-live comparison (ADR-0002 §4).
+//! Read-only: no lock, no writes. Exits `FAILURE` when drift exists
+//! — the non-zero status is how CI notices.
+
+use std::process::ExitCode;
+
+use cicada_core::application::{DetectDrift, DriftRequest};
+use cicada_core::domain::drift::DriftEntry;
+use cicada_core::ports::{CalendarRef, StateStore};
+use cicada_state::JsonFileStateStore;
+
+use crate::DriftArgs;
+use crate::backend;
+
+/// Run the verb; exit `FAILURE` on errors or when any drift exists.
+pub(crate) fn run(args: &DriftArgs) -> ExitCode {
+    if let Err(e) = backend::provider_name(args.provider.as_deref(), "drift") {
+        eprintln!("{e}");
+        return ExitCode::FAILURE;
+    }
+    let dir = backend::manifest_dir(&[]);
+    let state_path = cicada_state::resolve_state_path(&dir, args.state.as_deref());
+    let store = JsonFileStateStore::new(&state_path);
+    let provider = match backend::fake_provider(args.fake_file.as_deref(), &dir, "drift") {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let runtime = match backend::runtime("drift") {
+        Ok(rt) => rt,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let state = match runtime.block_on(store.load()) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("cicada drift: cannot load {}: {e}", state_path.display());
+            return ExitCode::FAILURE;
+        }
+    };
+    if state.calendars.is_empty() {
+        println!("drift: no recorded state — nothing applied yet");
+        return ExitCode::SUCCESS;
+    }
+
+    let mut drifted = 0usize;
+    let mut failed = false;
+    for (name, recorded) in &state.calendars {
+        let remote = CalendarRef::new(recorded.calendar_id.clone());
+        let req = DriftRequest {
+            calendar_name: name,
+            recorded,
+            provider: &provider,
+            remote_calendar: &remote,
+        };
+        match runtime.block_on(DetectDrift::new().run(&req)) {
+            Ok(entries) if entries.is_empty() => {
+                println!("{name}: no drift");
+            }
+            Ok(entries) => {
+                drifted += entries.len();
+                println!("{name}: {} drifted", entries.len());
+                for entry in &entries {
+                    println!("  {}", drift_line(entry));
+                }
+            }
+            Err(e) => {
+                eprintln!("cicada drift {name}: {e}");
+                failed = true;
+            }
+        }
+    }
+    if failed || drifted > 0 {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+/// One drift entry as `! local (remote id): kind — detail`.
+fn drift_line(entry: &DriftEntry) -> String {
+    match entry {
+        DriftEntry::Missing {
+            local_id,
+            remote_id,
+        } => format!("! {local_id} (remote {remote_id}): missing — live event is gone"),
+        DriftEntry::Modified {
+            local_id,
+            remote_id,
+            ..
+        } => format!("! {local_id} (remote {remote_id}): modified — live differs from recorded"),
+    }
+}
