@@ -40,10 +40,12 @@
 
 mod document;
 mod duration;
+mod emit;
 mod error;
 mod event;
 
 pub use document::{API_VERSION, Document, Manifest};
+pub use emit::emit_calendar;
 pub use error::SchemaError;
 
 /// Parse `source` into whichever document its `kind` declares.

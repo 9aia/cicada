@@ -334,7 +334,12 @@ const ANCHOR_SCAN_DAYS: i64 = 4 * 366;
 /// Mirrors the expander's day-level filters so the anchor is a real
 /// recurrence-set member, keeping `count` and weekly `interval`
 /// parity honest.
-fn anchor_datetime(rule: &StructuredRule, t: Clock) -> Option<DateTime> {
+///
+/// `pub(crate)` — the `fmt` emitter reuses this to decide whether a
+/// wall-time start can round-trip through the ergonomic `"HH:MM"`
+/// form (emitting it is only safe when re-parsing yields the same
+/// anchor).
+pub(crate) fn anchor_datetime(rule: &StructuredRule, t: Clock) -> Option<DateTime> {
     let mut d = ANCHOR_EPOCH;
     for _ in 0..ANCHOR_SCAN_DAYS {
         if rule_generates_on(rule, d) {
