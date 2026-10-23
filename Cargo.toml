@@ -39,8 +39,12 @@ tokio = { version = "1", features = [
 ] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
+tempfile = "3"
 anyhow = "1.0"
 clap = { version = "4", features = ["derive"] }
+# Field-path context on serde errors (spec.events[0].start), so DSL
+# diagnostics point at the offending field instead of raw serde sprawl.
+serde_path_to_error = "0.1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

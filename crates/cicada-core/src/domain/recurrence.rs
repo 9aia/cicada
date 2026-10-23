@@ -75,7 +75,9 @@ impl Weekday {
         }
     }
 
-    fn from_jiff(w: jiff::civil::Weekday) -> Self {
+    /// The matching [`Weekday`] for a jiff civil weekday — used by
+    /// the DSL anchor logic and other adapters that hold civil dates.
+    pub fn from_jiff(w: jiff::civil::Weekday) -> Self {
         match w {
             jiff::civil::Weekday::Monday => Self::Monday,
             jiff::civil::Weekday::Tuesday => Self::Tuesday,
@@ -231,8 +233,10 @@ impl Frequency {
         }
     }
 
-    /// Expandable frequencies (`DAILY` and coarser).
-    fn is_expandable(self) -> bool {
+    /// Expandable frequencies (`DAILY` and coarser). Sub-daily rules
+    /// parse and compare but cannot be expanded — validation surfaces
+    /// this as a warning.
+    pub fn is_expandable(self) -> bool {
         matches!(
             self,
             Self::Daily | Self::Weekly | Self::Monthly | Self::Yearly

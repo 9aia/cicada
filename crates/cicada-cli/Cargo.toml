@@ -17,6 +17,10 @@ cicada-schema.workspace = true
 cicada-state.workspace = true
 cicada-google.workspace = true
 cicada-mcp.workspace = true
+clap.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true
