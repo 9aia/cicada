@@ -15,6 +15,7 @@ cicada-schema = { path = "crates/cicada-schema" }
 cicada-state = { path = "crates/cicada-state" }
 cicada-google = { path = "crates/cicada-google" }
 cicada-mcp = { path = "crates/cicada-mcp" }
+cicada-shell = { path = "crates/cicada-shell" }
 cicada-testkit = { path = "crates/cicada-testkit" }
 
 # External dependencies — pin conservative majors/minors.
@@ -38,7 +39,7 @@ tokio = { version = "1", features = [
   "time",
 ] }
 tracing = "0.1"
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tempfile = "3"
 anyhow = "1.0"
 clap = { version = "4", features = ["derive"] }
@@ -49,6 +50,12 @@ serde_path_to_error = "0.1"
 # (Oct 2025) is the mature fs2 successor — rustix-based, owned-guard
 # semantics via the File handle.
 fs4 = { version = "0.13", features = ["sync"] }
+# MCP server transport (ADR-0001 §8a). rmcp is the official MCP Rust
+# SDK; ~3.5.1 (Oct 5 2026) pinned conservative — server + stdio only.
+rmcp = { version = "~3.5.1", default-features = false, features = [
+  "server",
+  "transport-io",
+] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

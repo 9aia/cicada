@@ -1,20 +1,20 @@
-//! `--from`/`--to` bound parsing for `range`/`show`: `today`, `+Nd`,
-//! `+Nw`, ISO dates, civil datetimes, and RFC 3339 instants —
-//! resolved against a calendar's time zone so bounds mean what the
-//! user means locally.
+//! `from`/`to` bound parsing for `range`/`show` and the MCP tools:
+//! `today`, `+Nd`, `+Nw`, ISO dates, civil datetimes, and RFC 3339
+//! instants — resolved against a calendar's time zone so bounds mean
+//! what the user means locally.
 
 use cicada_core::domain::ids::ZoneId;
 use jiff::civil::{Date, DateTime};
 use jiff::{Span, Timestamp};
 
-/// Parse a CLI time bound into an instant:
+/// Parse a time bound into an instant:
 ///
 /// - `today` — today at 00:00 in `zone`
 /// - `+Nd` / `+Nw` — N days / weeks after today at 00:00 in `zone`
 /// - `YYYY-MM-DD` — that date at 00:00 in `zone`
 /// - `YYYY-MM-DDTHH:MM[:SS]` — that civil time in `zone`
 /// - RFC 3339 with an offset — the absolute instant
-pub(crate) fn parse_bound(input: &str, zone: &ZoneId) -> Result<Timestamp, String> {
+pub fn parse_bound(input: &str, zone: &ZoneId) -> Result<Timestamp, String> {
     let s = input.trim();
     let tz = zone.timezone().map_err(|e| e.to_string())?;
     let today = || Timestamp::now().to_zoned(tz.clone()).date();

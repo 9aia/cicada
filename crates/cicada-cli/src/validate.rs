@@ -16,8 +16,8 @@ use cicada_core::application::{Severity, ValidateCalendar};
 use cicada_core::ports::logger::{LogLevel, Logger};
 use cicada_schema::{Document, parse_calendar, parse_document};
 
-use crate::input::{MANIFEST_NAMES, render_schema_error};
 use crate::logging::ConsoleLogger;
+use cicada_shell::input::{MANIFEST_NAMES, render_schema_error};
 
 /// A file to validate, or a discovery failure to report in place.
 enum Target {

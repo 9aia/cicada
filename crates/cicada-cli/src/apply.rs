@@ -8,6 +8,7 @@
 //! partial applies are honest (ADR-0001 §4).
 
 use std::io::Write as _;
+use std::path::Path;
 use std::process::ExitCode;
 
 use cicada_core::application::{
@@ -20,9 +21,9 @@ use cicada_core::ports::clock::SystemClock;
 use cicada_state::JsonFileStateStore;
 
 use crate::ApplyArgs;
-use crate::backend;
-use crate::input;
 use crate::plan::print_plan;
+use cicada_shell::backend;
+use cicada_shell::input;
 
 /// One calendar's plan + binding, staged for application.
 struct Staged<'a> {
@@ -52,7 +53,7 @@ pub(crate) fn run(args: &ApplyArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let files = match input::resolve_calendar_files(&args.files) {
+    let files = match input::resolve_calendar_files(Path::new("."), &args.files) {
         Ok(f) if f.is_empty() => {
             eprintln!("cicada apply: no calendar files found");
             return ExitCode::FAILURE;
@@ -70,7 +71,7 @@ pub(crate) fn run(args: &ApplyArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let dir = backend::manifest_dir(&args.files);
+    let dir = backend::manifest_dir(Path::new("."), &args.files);
     let state_path = cicada_state::resolve_state_path(&dir, args.state.as_deref());
     let store = JsonFileStateStore::new(&state_path);
     let provider = match backend::fake_provider(args.fake_file.as_deref(), &dir, "apply") {

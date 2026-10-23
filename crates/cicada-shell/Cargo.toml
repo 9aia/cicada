@@ -1,0 +1,18 @@
+[package]
+name = "cicada-shell"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+cicada-core.workspace = true
+cicada-schema.workspace = true
+cicada-testkit.workspace = true
+jiff.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

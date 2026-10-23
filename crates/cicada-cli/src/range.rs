@@ -3,6 +3,7 @@
 //! Local view over the YAML only; `--provider` is reserved for the
 //! live view and noted when passed.
 
+use std::path::Path;
 use std::process::ExitCode;
 
 use cicada_core::application::{QueryRange, RangeOccurrence};
@@ -10,8 +11,8 @@ use cicada_core::domain::ids::ZoneId;
 use cicada_core::domain::time::TimeRange;
 
 use crate::RangeArgs;
-use crate::input;
-use crate::timeparse::parse_bound;
+use cicada_shell::input;
+use cicada_shell::timeparse::parse_bound;
 
 /// Default window when neither bound is given.
 const DEFAULT_FROM: &str = "today";
@@ -66,7 +67,7 @@ pub(crate) fn run(args: &RangeArgs) -> ExitCode {
 fn load_and_zone(
     files: &[std::path::PathBuf],
 ) -> Result<(Vec<cicada_core::domain::calendar::Calendar>, ZoneId), String> {
-    let files = input::resolve_calendar_files(files)?;
+    let files = input::resolve_calendar_files(Path::new("."), files)?;
     let calendars = input::load_calendars(&files)?;
     let zone = calendars
         .first()

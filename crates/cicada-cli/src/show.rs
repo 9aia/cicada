@@ -1,6 +1,7 @@
 //! `cicada show <id>` — one event's declared detail plus its
 //! expanded occurrences in a window (default: the next 30 days).
 
+use std::path::Path;
 use std::process::ExitCode;
 
 use cicada_core::application::{ShowEvent, default_window};
@@ -9,9 +10,9 @@ use cicada_core::domain::ids::{LocalId, ZoneId};
 use cicada_core::domain::time::{Time, TimeRange};
 
 use crate::ShowArgs;
-use crate::input;
 use crate::range::occurrence_line;
-use crate::timeparse::parse_bound;
+use cicada_shell::input;
+use cicada_shell::timeparse::parse_bound;
 
 /// Default window: today + 30 days.
 const WINDOW_DAYS: i64 = 30;
@@ -21,7 +22,7 @@ const OCCURRENCE_CAP: usize = 20;
 
 /// Run the verb.
 pub(crate) fn run(args: &ShowArgs) -> ExitCode {
-    let files = match input::resolve_calendar_files(&args.files) {
+    let files = match input::resolve_calendar_files(Path::new("."), &args.files) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("cicada show: {e}");

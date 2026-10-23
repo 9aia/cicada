@@ -7,8 +7,29 @@ repository.workspace = true
 license.workspace = true
 publish = false
 
+[[bin]]
+name = "cicada-mcp"
+path = "src/bin/cicada-mcp.rs"
+
 [dependencies]
 cicada-core.workspace = true
+cicada-schema.workspace = true
+cicada-shell.workspace = true
+cicada-state.workspace = true
+cicada-testkit.workspace = true
+clap.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+jiff.workspace = true
+sha2.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+rmcp.workspace = true
+
+[dev-dependencies]
+cicada-core.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true

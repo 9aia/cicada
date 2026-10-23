@@ -1,9 +1,9 @@
-//! Shared input plumbing for verbs that read calendar YAML:
+//! Shared input plumbing for interfaces that read calendar YAML:
 //! manifest discovery, `kind: Manifest` expansion, and
-//! read+parse-in-one-shot loading. `validate` keeps its own
+//! read+parse-in-one-shot loading. `cicada validate` keeps its own
 //! per-file reporting path (it must survive individual failures);
-//! `plan`/`range`/`show` fail fast — a partial desired state plans
-//! the wrong reconciliation.
+//! `plan`/`range`/`show`/the MCP tools fail fast — a partial desired
+//! state plans the wrong reconciliation.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -12,22 +12,23 @@ use cicada_core::domain::calendar::Calendar;
 use cicada_schema::{Document, SchemaError, parse_calendar, parse_document};
 
 /// Manifest filenames probed when a verb gets no file arguments.
-pub(crate) const MANIFEST_NAMES: [&str; 2] = ["cicada.yaml", "cicada.yml"];
+pub const MANIFEST_NAMES: [&str; 2] = ["cicada.yaml", "cicada.yml"];
 
-/// Resolve the calendar files a verb should operate on: explicit
-/// arguments (a `kind: Manifest` expands to its calendar list,
-/// relative to its own directory), or the discovered `cicada.yaml`
-/// in the current directory.
-pub(crate) fn resolve_calendar_files(files: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
+/// Resolve the calendar files an interface should operate on:
+/// explicit arguments (a `kind: Manifest` expands to its calendar
+/// list, relative to its own directory), or the discovered
+/// `cicada.yaml`/`cicada.yml` in `root`.
+pub fn resolve_calendar_files(root: &Path, files: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
     if files.is_empty() {
         let manifest = MANIFEST_NAMES
             .iter()
-            .map(PathBuf::from)
+            .map(|n| root.join(n))
             .find(|p| p.is_file())
             .ok_or_else(|| {
-                "no files given and no cicada.yaml manifest found in the \
-                 current directory"
-                    .to_owned()
+                format!(
+                    "no files given and no cicada.yaml manifest found in {}",
+                    root.display()
+                )
             })?;
         return Ok(expand(&manifest));
     }
@@ -57,7 +58,7 @@ fn expand(path: &Path) -> Vec<PathBuf> {
 
 /// Read + parse every calendar file, failing fast on the first
 /// error. Returns calendars in file order.
-pub(crate) fn load_calendars(files: &[PathBuf]) -> Result<Vec<Calendar>, String> {
+pub fn load_calendars(files: &[PathBuf]) -> Result<Vec<Calendar>, String> {
     files.iter().map(|p| load_calendar(p)).collect()
 }
 
@@ -69,7 +70,7 @@ fn load_calendar(path: &Path) -> Result<Calendar, String> {
 }
 
 /// Compact `SchemaError` rendering — `path: msg` or `line:col: msg`.
-pub(crate) fn render_schema_error(e: &SchemaError) -> String {
+pub fn render_schema_error(e: &SchemaError) -> String {
     if let Some(path) = &e.path {
         format!("{}: {}", path, e.message)
     } else if let (Some(l), Some(c)) = (e.line, e.column) {

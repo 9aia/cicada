@@ -9,6 +9,7 @@
 
 use std::fmt::Write as _;
 use std::fs;
+use std::path::Path;
 use std::process::ExitCode;
 
 use cicada_core::application::{PlanCalendar, PlanRequest};
@@ -19,8 +20,8 @@ use cicada_core::ports::clock::SystemClock;
 use cicada_state::JsonFileStateStore;
 
 use crate::PlanArgs;
-use crate::backend;
-use crate::input;
+use cicada_shell::backend;
+use cicada_shell::input;
 
 /// Run the verb; exit `FAILURE` on load/plan errors or when any plan
 /// carries error-severity findings (apply would refuse it anyway).
@@ -32,7 +33,7 @@ pub(crate) fn run(args: &PlanArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let files = match input::resolve_calendar_files(&args.files) {
+    let files = match input::resolve_calendar_files(Path::new("."), &args.files) {
         Ok(f) if f.is_empty() => {
             eprintln!("cicada plan: no calendar files found");
             return ExitCode::FAILURE;
@@ -50,7 +51,7 @@ pub(crate) fn run(args: &PlanArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let dir = backend::manifest_dir(&args.files);
+    let dir = backend::manifest_dir(Path::new("."), &args.files);
     let state_path = cicada_state::resolve_state_path(&dir, args.state.as_deref());
     let store = JsonFileStateStore::new(&state_path);
     let provider = match backend::fake_provider(args.fake_file.as_deref(), &dir, "plan") {

@@ -2,6 +2,7 @@
 //! (ADR-0002 §4). Runs under the state file's advisory lock like
 //! apply; it's the write that makes drift reconcile.
 
+use std::path::Path;
 use std::process::ExitCode;
 
 use cicada_core::application::{RefreshReport, RefreshRequest, RefreshState};
@@ -10,7 +11,7 @@ use cicada_core::ports::{CalendarRef, StateStore};
 use cicada_state::JsonFileStateStore;
 
 use crate::RefreshArgs;
-use crate::backend;
+use cicada_shell::backend;
 
 /// Run the verb; exit `FAILURE` on provider/store errors.
 pub(crate) fn run(args: &RefreshArgs) -> ExitCode {
@@ -18,7 +19,7 @@ pub(crate) fn run(args: &RefreshArgs) -> ExitCode {
         eprintln!("{e}");
         return ExitCode::FAILURE;
     }
-    let dir = backend::manifest_dir(&[]);
+    let dir = backend::manifest_dir(Path::new("."), &[]);
     let state_path = cicada_state::resolve_state_path(&dir, args.state.as_deref());
     let store = JsonFileStateStore::new(&state_path);
     let provider = match backend::fake_provider(args.fake_file.as_deref(), &dir, "refresh") {

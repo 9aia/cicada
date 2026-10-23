@@ -5,15 +5,12 @@
 #![forbid(unsafe_code)]
 
 mod apply;
-mod backend;
 mod drift;
-mod input;
 mod logging;
 mod plan;
 mod range;
 mod refresh;
 mod show;
-mod timeparse;
 mod validate;
 
 use std::path::PathBuf;
@@ -61,8 +58,8 @@ enum Commands {
     Fmt(FmtArgs),
     /// Manage provider registrations (`provider add google`).
     Provider(ProviderArgs),
-    /// Serve MCP over stdio — the same core, for agents.
-    Mcp,
+    /// Serve MCP over stdio — the same core, for agents (ADR-0001 §8a).
+    Mcp(cicada_mcp::ServerOptions),
 }
 
 /// `cicada validate [files...]`.
@@ -237,7 +234,7 @@ fn main() -> ExitCode {
         Some(Commands::Init) => not_implemented("init"),
         Some(Commands::Fmt(_)) => not_implemented("fmt"),
         Some(Commands::Provider(_)) => not_implemented("provider"),
-        Some(Commands::Mcp) => not_implemented("mcp"),
+        Some(Commands::Mcp(opts)) => cicada_mcp::run_stdio(&opts),
     }
 }
 

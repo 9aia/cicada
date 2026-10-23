@@ -2,6 +2,7 @@
 //! Read-only: no lock, no writes. Exits `FAILURE` when drift exists
 //! — the non-zero status is how CI notices.
 
+use std::path::Path;
 use std::process::ExitCode;
 
 use cicada_core::application::{DetectDrift, DriftRequest};
@@ -10,7 +11,7 @@ use cicada_core::ports::{CalendarRef, StateStore};
 use cicada_state::JsonFileStateStore;
 
 use crate::DriftArgs;
-use crate::backend;
+use cicada_shell::backend;
 
 /// Run the verb; exit `FAILURE` on errors or when any drift exists.
 pub(crate) fn run(args: &DriftArgs) -> ExitCode {
@@ -18,7 +19,7 @@ pub(crate) fn run(args: &DriftArgs) -> ExitCode {
         eprintln!("{e}");
         return ExitCode::FAILURE;
     }
-    let dir = backend::manifest_dir(&[]);
+    let dir = backend::manifest_dir(Path::new("."), &[]);
     let state_path = cicada_state::resolve_state_path(&dir, args.state.as_deref());
     let store = JsonFileStateStore::new(&state_path);
     let provider = match backend::fake_provider(args.fake_file.as_deref(), &dir, "drift") {
