@@ -8,3 +8,6 @@ jobs = 6
 # Compile cache (sccache) — install once, every build reuses artifacts.
 # Disable by deleting this line.
 rustc-wrapper = "sccache"
+# Isolate from the machine-global shared-target (see ~/.cargo/config.toml):
+# builds here don't queue behind other workspaces' build-dir locks.
+target-dir = "target"
