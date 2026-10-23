@@ -10,7 +10,9 @@ publish = false
 [dependencies]
 cicada-core.workspace = true
 cicada-schema.workspace = true
+cicada-google.workspace = true
 cicada-testkit.workspace = true
+async-trait.workspace = true
 jiff.workspace = true
 tokio.workspace = true
 

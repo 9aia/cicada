@@ -1,0 +1,26 @@
+{
+  "kind": "calendar#events",
+  "etag": "\"3385852702942100\"",
+  "summary": "work",
+  "timeZone": "America/Sao_Paulo",
+  "accessRole": "owner",
+  "nextPageToken": "page-two-token",
+  "items": [
+    {
+      "kind": "calendar#event",
+      "etag": "\"3385852702942101\"",
+      "id": "g-evt-page1",
+      "status": "confirmed",
+      "summary": "Page one event",
+      "start": { "dateTime": "2026-10-20T14:00:00-03:00", "timeZone": "America/Sao_Paulo" },
+      "end": { "dateTime": "2026-10-20T15:00:00-03:00", "timeZone": "America/Sao_Paulo" },
+      "extendedProperties": {
+        "private": {
+          "cicada:id": "page-one",
+          "cicada:managed": "1",
+          "cicada:state": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+        }
+      }
+    }
+  ]
+}

@@ -7,6 +7,8 @@
 //!   conditional writes, and out-of-band-edit seams.
 //! - [`MemoryStateStore`] — in-memory `StateStore` (state + journal).
 //! - [`FakeClock`] — settable `Clock`.
+//! - [`FixtureHttp`] — scripted `Http` (request/response fixtures) for
+//!   provider-adapter tests (ADR-0001 §10 step 8).
 //!
 //! Golden fixtures for `plan-v1`/`state-v1` documents land here as
 //! the wire formats stabilize (ADR-0002 §7/§11).
@@ -15,10 +17,12 @@
 
 pub mod clock;
 pub mod file_provider;
+pub mod http;
 pub mod provider;
 pub mod state;
 
 pub use clock::FakeClock;
 pub use file_provider::FakeFileProvider;
+pub use http::{Expectation, FixtureHttp};
 pub use provider::{FakeCalendarProvider, FakeSnapshot};
 pub use state::MemoryStateStore;

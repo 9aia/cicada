@@ -56,6 +56,19 @@ rmcp = { version = "~3.5.1", default-features = false, features = [
   "server",
   "transport-io",
 ] }
+# HTTP client for the Google adapter (Http port impl). reqwest 0.12.28
+# (Dec 2025) is >7 days old; rustls with the ring provider + platform
+# roots keeps the build C-free (no aws-lc-rs/cmake).
+reqwest = { version = "0.12", default-features = false, features = [
+  "rustls-tls-native-roots",
+  "http2",
+  "system-proxy",
+] }
+# Service-account JWT (RS256) for Google auth. jsonwebtoken 10.4
+# (May 2026) is >7 days old; rust_crypto is the pure-Rust backend.
+jsonwebtoken = { version = "10", features = ["rust_crypto"] }
+# URL building/query encoding for provider adapters.
+url = "2.5"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

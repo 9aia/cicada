@@ -15,14 +15,18 @@ use cicada_shell::backend;
 
 /// Run the verb; exit `FAILURE` on errors or when any drift exists.
 pub(crate) fn run(args: &DriftArgs) -> ExitCode {
-    if let Err(e) = backend::provider_name(args.provider.as_deref(), "drift") {
-        eprintln!("{e}");
-        return ExitCode::FAILURE;
-    }
+    let provider_name = match backend::provider_name(args.provider.as_deref(), "drift") {
+        Ok(n) => n,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::FAILURE;
+        }
+    };
     let dir = backend::manifest_dir(Path::new("."), &[]);
     let state_path = cicada_state::resolve_state_path(&dir, args.state.as_deref());
     let store = JsonFileStateStore::new(&state_path);
-    let provider = match backend::fake_provider(args.fake_file.as_deref(), &dir, "drift") {
+    let provider = match backend::provider(&provider_name, args.fake_file.as_deref(), &dir, "drift")
+    {
         Ok(p) => p,
         Err(e) => {
             eprintln!("{e}");

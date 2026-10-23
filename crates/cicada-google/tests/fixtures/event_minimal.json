@@ -1,0 +1,12 @@
+{
+  "kind": "calendar#event",
+  "etag": "\"3385852702942001\"",
+  "id": "g-evt-lunch",
+  "status": "confirmed",
+  "summary": "Lunch",
+  "start": { "dateTime": "2026-10-21T12:00:00Z" },
+  "end": { "dateTime": "2026-10-21T13:00:00Z" },
+  "iCalUID": "g-evt-lunch@google.com",
+  "sequence": 0,
+  "eventType": "default"
+}

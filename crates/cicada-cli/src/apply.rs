@@ -74,7 +74,8 @@ pub(crate) fn run(args: &ApplyArgs) -> ExitCode {
     let dir = backend::manifest_dir(Path::new("."), &args.files);
     let state_path = cicada_state::resolve_state_path(&dir, args.state.as_deref());
     let store = JsonFileStateStore::new(&state_path);
-    let provider = match backend::fake_provider(args.fake_file.as_deref(), &dir, "apply") {
+    let provider = match backend::provider(&provider_name, args.fake_file.as_deref(), &dir, "apply")
+    {
         Ok(p) => p,
         Err(e) => {
             eprintln!("{e}");

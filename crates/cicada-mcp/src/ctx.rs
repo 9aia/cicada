@@ -15,9 +15,9 @@ use std::path::{Path, PathBuf};
 use cicada_core::domain::calendar::Calendar;
 use cicada_core::domain::state::RecordedCalendar;
 use cicada_core::ports::CalendarRef;
-use cicada_shell::{backend, input};
+use cicada_shell::backend::{self, Backend};
+use cicada_shell::input;
 use cicada_state::JsonFileStateStore;
-use cicada_testkit::FakeFileProvider;
 use clap::Args;
 
 /// Environment variable holding the working root when `--root` is
@@ -32,8 +32,8 @@ pub struct ServerOptions {
     /// Defaults to `CICADA_ROOT`, then the current directory.
     #[arg(long)]
     pub root: Option<PathBuf>,
-    /// Provider adapter to use (fake | google; google is a stub —
-    /// errors clearly until the adapter lands).
+    /// Provider adapter to use (fake | google; google needs
+    /// credentials via env — see `GoogleAuthConfig::from_env`).
     #[arg(long)]
     pub provider: Option<String>,
     /// Fake provider backend file (test/demo only; default
@@ -53,7 +53,7 @@ pub struct Session {
     root: PathBuf,
     /// Calendar files resolved from the root manifest.
     files: Vec<PathBuf>,
-    /// Selected provider adapter name (`fake`; `google` is stubbed).
+    /// Selected provider adapter name (`fake` | `google`).
     provider_name: String,
     /// Explicit `--fake-file`, if any.
     fake_file: Option<PathBuf>,
@@ -67,8 +67,7 @@ impl Session {
     ///
     /// # Errors
     /// `String` — transport-level surfaces (tool error results) wrap
-    /// these; `google` selection fails here with a clear
-    /// not-implemented message.
+    /// these; an unknown `--provider` fails here.
     pub fn open(opts: &ServerOptions) -> Result<Self, String> {
         let root = opts
             .root
@@ -110,10 +109,16 @@ impl Session {
         input::load_calendars(&self.files)
     }
 
-    /// Re-open the file-backed fake provider against its on-disk
-    /// snapshot, so out-of-band edits by other processes are visible.
-    pub fn provider(&self, who: &str) -> Result<FakeFileProvider, String> {
-        backend::fake_provider(self.fake_file.as_deref(), &self.root, who)
+    /// Open the selected provider backend — `fake` re-reads its
+    /// on-disk snapshot so out-of-band edits by other processes are
+    /// visible; `google` builds a fresh adapter over live HTTP.
+    pub fn provider(&self, who: &str) -> Result<Backend, String> {
+        backend::provider(
+            &self.provider_name,
+            self.fake_file.as_deref(),
+            &self.root,
+            who,
+        )
     }
 
     /// The state store handle (loads/saves on demand).

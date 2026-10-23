@@ -50,12 +50,14 @@ fn plan_against_fake_provider_is_all_create() {
 }
 
 #[test]
-fn plan_provider_google_reports_not_implemented() {
+fn plan_provider_google_needs_credentials() {
+    // The google adapter is wired — without credentials it fails
+    // with a clear configuration error, not a stub.
     let dir = fixture();
     let out = cicada(&dir, &["plan", "--provider", "google"]);
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("not implemented"), "{stderr}");
+    assert!(stderr.contains("no google credentials"), "{stderr}");
 }
 
 #[test]

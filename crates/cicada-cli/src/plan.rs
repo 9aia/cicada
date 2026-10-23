@@ -2,10 +2,11 @@
 //! an optional `cicada/plan-v1` JSON document (ADR-0002 §11).
 //!
 //! Provider selection: `--provider fake` (the default) plans against
-//! the file-backed [`FakeFileProvider`]; `--provider google` is the
-//! next build step. Recorded state loads from `.cicada/state.yaml`
-//! via [`JsonFileStateStore`] — absent means first-run, all-`Create`
-//! plans.
+//! the file-backed [`FakeFileProvider`]; `--provider google` plans
+//! against the live Calendar API (credentials via env — see
+//! `cicada_google::GoogleAuthConfig::from_env`). Recorded state loads
+//! from `.cicada/state.yaml` via [`JsonFileStateStore`] — absent
+//! means first-run, all-`Create` plans.
 
 use std::fmt::Write as _;
 use std::fs;
@@ -54,7 +55,8 @@ pub(crate) fn run(args: &PlanArgs) -> ExitCode {
     let dir = backend::manifest_dir(Path::new("."), &args.files);
     let state_path = cicada_state::resolve_state_path(&dir, args.state.as_deref());
     let store = JsonFileStateStore::new(&state_path);
-    let provider = match backend::fake_provider(args.fake_file.as_deref(), &dir, "plan") {
+    let provider = match backend::provider(&provider_name, args.fake_file.as_deref(), &dir, "plan")
+    {
         Ok(p) => p,
         Err(e) => {
             eprintln!("{e}");

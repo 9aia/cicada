@@ -1,0 +1,75 @@
+{
+  "kind": "calendar#event",
+  "etag": "\"3385852702942000\"",
+  "id": "g-evt-standup",
+  "status": "confirmed",
+  "htmlLink": "https://www.google.com/calendar/event?eid=Z2V2dHN0YW5kdXA",
+  "created": "2026-10-20T10:00:00.000Z",
+  "updated": "2026-10-20T11:12:13.442Z",
+  "summary": "Daily Standup",
+  "description": "Fifteen minutes, cameras optional.",
+  "location": "Room 4 / Meet",
+  "creator": { "email": "luis@example.com" },
+  "organizer": { "email": "work@group.calendar.google.com" },
+  "start": {
+    "dateTime": "2026-10-20T09:00:00-03:00",
+    "timeZone": "America/Sao_Paulo"
+  },
+  "end": {
+    "dateTime": "2026-10-20T09:30:00-03:00",
+    "timeZone": "America/Sao_Paulo"
+  },
+  "recurrence": ["RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"],
+  "attendees": [
+    {
+      "email": "alice@example.com",
+      "responseStatus": "accepted"
+    },
+    {
+      "email": "bob@example.com",
+      "optional": true,
+      "responseStatus": "tentative"
+    }
+  ],
+  "reminders": {
+    "useDefault": false,
+    "overrides": [
+      { "method": "popup", "minutes": 10 },
+      { "method": "email", "minutes": 60 }
+    ]
+  },
+  "transparency": "transparent",
+  "hangoutLink": "https://meet.google.com/abc-defg-hij",
+  "conferenceData": {
+    "conferenceId": "abc-defg-hij",
+    "conferenceSolution": {
+      "key": { "type": "hangoutsMeet" },
+      "name": "Google Meet",
+      "iconUri": "https://fonts.gstatic.com/s/i/productlogos/meet_2020q4/v6/web-512dp/logo_meet_2020q4_color_2x_web_512dp.png"
+    },
+    "entryPoints": [
+      {
+        "entryPointType": "video",
+        "uri": "https://meet.google.com/abc-defg-hij",
+        "label": "meet.google.com/abc-defg-hij"
+      },
+      {
+        "entryPointType": "phone",
+        "uri": "tel:+1-555-0100-1234",
+        "label": "+1 555-010-1234",
+        "pin": "12345678"
+      }
+    ]
+  },
+  "extendedProperties": {
+    "private": {
+      "cicada:id": "standup",
+      "cicada:managed": "1",
+      "cicada:state": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "other-tool:note": "left alone"
+    }
+  },
+  "iCalUID": "g-evt-standup@google.com",
+  "sequence": 1,
+  "eventType": "default"
+}

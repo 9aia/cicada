@@ -1,0 +1,24 @@
+{
+  "kind": "calendar#events",
+  "etag": "\"3385852702942200\"",
+  "summary": "work",
+  "timeZone": "America/Sao_Paulo",
+  "accessRole": "owner",
+  "items": [
+    {
+      "kind": "calendar#event",
+      "etag": "\"3385852702942201\"",
+      "id": "g-evt-page2",
+      "status": "confirmed",
+      "summary": "Page two event",
+      "start": { "date": "2026-10-22" },
+      "end": { "date": "2026-10-23" }
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"3385852702942202\"",
+      "id": "g-evt-cancelled",
+      "status": "cancelled"
+    }
+  ]
+}

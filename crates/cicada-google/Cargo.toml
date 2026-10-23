@@ -9,6 +9,20 @@ publish = false
 
 [dependencies]
 cicada-core.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+jiff.workspace = true
+reqwest.workspace = true
+jsonwebtoken.workspace = true
+url.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+cicada-testkit.workspace = true
+tempfile.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true
