@@ -18,6 +18,38 @@ pub enum SendUpdates {
     All,
 }
 
+impl SendUpdates {
+    /// `true` for the ADR-0002 §5 default (`ExternalOnly`).
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Wire form (`none` / `externalOnly` / `all`) — for flag parsing
+    /// and diagnostics.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::ExternalOnly => "externalOnly",
+            Self::All => "all",
+        }
+    }
+
+    /// Parse the `spec.apply.sendUpdates` / `--notify` spellings.
+    ///
+    /// # Errors
+    /// [`CicadaError::Fatal`] on an unknown value.
+    pub fn parse(s: &str) -> crate::domain::error::Result<Self> {
+        match s {
+            "none" => Ok(Self::None),
+            "externalOnly" | "external-only" | "external_only" => Ok(Self::ExternalOnly),
+            "all" => Ok(Self::All),
+            other => Err(crate::domain::error::CicadaError::fatal(format!(
+                "unknown sendUpdates {other:?} (expected none | externalOnly | all)"
+            ))),
+        }
+    }
+}
+
 /// Per-write options threaded through `CalendarProvider` mutations.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

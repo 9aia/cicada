@@ -45,6 +45,10 @@ clap = { version = "4", features = ["derive"] }
 # Field-path context on serde errors (spec.events[0].start), so DSL
 # diagnostics point at the offending field instead of raw serde sprawl.
 serde_path_to_error = "0.1"
+# Advisory file locks for the state store (ADR-0002 §7). fs4 0.13.1
+# (Oct 2025) is the mature fs2 successor — rustix-based, owned-guard
+# semantics via the File handle.
+fs4 = { version = "0.13", features = ["sync"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

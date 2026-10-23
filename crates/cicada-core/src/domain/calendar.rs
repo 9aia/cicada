@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use super::error::{CicadaError, Result};
 use super::event::Event;
 use super::ids::{LocalId, ZoneId};
+use super::policy::SendUpdates;
 
 /// A logical calendar: name + zone + declared events.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -30,6 +31,11 @@ pub struct Calendar {
     /// `primary`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_calendar_id: Option<String>,
+    /// Notification policy for writes (`spec.apply.sendUpdates`;
+    /// default `ExternalOnly`, ADR-0002 §5). Interfaces may
+    /// override — `--notify`, the `plan.apply` tool parameter.
+    #[serde(default, skip_serializing_if = "SendUpdates::is_default")]
+    pub send_updates: SendUpdates,
     /// Declared events keyed by stable local id.
     #[serde(default)]
     pub events: BTreeMap<LocalId, Event>,
@@ -46,6 +52,7 @@ impl Calendar {
             time_zone: ZoneId::new(zone)?,
             provider: None,
             provider_calendar_id: None,
+            send_updates: SendUpdates::default(),
             events: BTreeMap::new(),
         })
     }

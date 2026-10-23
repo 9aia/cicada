@@ -545,6 +545,7 @@ mod tests {
             time_zone: ZoneId::new("UTC").unwrap(),
             provider: Some("google".into()),
             provider_calendar_id: Some("primary".into()),
+            send_updates: crate::domain::policy::SendUpdates::default(),
             events: BTreeMap::new(),
         };
         let report = run(&cal);

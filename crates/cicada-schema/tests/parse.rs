@@ -400,3 +400,70 @@ spec:
     assert_eq!(e.reminders[1].kind, ReminderKind::Email);
     assert_eq!(e.reminders[1].offset.as_secs(), 3600);
 }
+
+#[test]
+fn spec_apply_send_updates_parses_and_defaults() {
+    // Default is externalOnly (ADR-0002 §5).
+    let cal = parse_calendar(
+        r#"
+apiVersion: cicada/v1
+kind: Calendar
+metadata: { name: w, timeZone: UTC }
+spec:
+  events: []
+"#,
+    )
+    .unwrap();
+    assert_eq!(
+        cal.send_updates,
+        cicada_core::domain::policy::SendUpdates::ExternalOnly
+    );
+
+    let cal = parse_calendar(
+        r#"
+apiVersion: cicada/v1
+kind: Calendar
+metadata: { name: w, timeZone: UTC }
+spec:
+  apply:
+    sendUpdates: none
+  events: []
+"#,
+    )
+    .unwrap();
+    assert_eq!(
+        cal.send_updates,
+        cicada_core::domain::policy::SendUpdates::None
+    );
+
+    // Unknown values and unknown apply keys fail at their paths.
+    let err = parse_calendar(
+        r#"
+apiVersion: cicada/v1
+kind: Calendar
+metadata: { name: w, timeZone: UTC }
+spec:
+  apply:
+    sendUpdates: everybody
+  events: []
+"#,
+    )
+    .unwrap_err();
+    assert!(
+        err.path.as_deref().unwrap_or("").contains("sendUpdates"),
+        "{err:?}"
+    );
+    let err = parse_calendar(
+        r#"
+apiVersion: cicada/v1
+kind: Calendar
+metadata: { name: w, timeZone: UTC }
+spec:
+  apply:
+    bogus: true
+  events: []
+"#,
+    )
+    .unwrap_err();
+    assert!(err.message.contains("bogus"), "{err:?}");
+}

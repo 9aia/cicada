@@ -231,8 +231,10 @@ fn plan_warning(issue: CapabilityIssue) -> PlanWarning {
 }
 
 /// Compare one managed record with its live counterpart (ADR-0002
-/// §4). `None` means recorded == live (no drift).
-fn detect_drift(
+/// §4). `None` means recorded == live (no drift). Shared with the
+/// `DetectDrift`/`RefreshState` use cases — one definition of drift
+/// for plan, drift, and refresh.
+pub(crate) fn detect_drift(
     local_id: &LocalId,
     rec: &RecordedEvent,
     live: Option<&RemoteEvent>,
@@ -270,8 +272,8 @@ fn detect_drift(
 /// Recompute the content hash of a live body *as the event the
 /// record describes* — the recorded hash includes the local id
 /// ([`Event::content_hash`]), so the live body is hashed under the
-/// same id.
-fn live_content_hash(local_id: &LocalId, body: &EventBody) -> Option<ContentHash> {
+/// same id. Refresh records this as the new recorded hash.
+pub(crate) fn live_content_hash(local_id: &LocalId, body: &EventBody) -> Option<ContentHash> {
     Event::new(local_id.clone(), body.clone())
         .content_hash()
         .ok()

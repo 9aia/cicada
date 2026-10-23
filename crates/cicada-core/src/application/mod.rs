@@ -10,16 +10,22 @@
 //! and call providers; use cases see only parsed, portable values.
 //!
 //! `cicada validate` → [`ValidateCalendar`]; `plan` →
-//! [`PlanCalendar`]; `range`/`show` → [`QueryRange`]/[`ShowEvent`];
-//! `apply`, `refresh`, `drift`, `fmt` land in later build steps
-//! against the same shape.
+//! [`PlanCalendar`]; `apply` → [`ApplyPlan`]; `refresh` →
+//! [`RefreshState`]; `drift` → [`DetectDrift`]; `range`/`show` →
+//! [`QueryRange`]/[`ShowEvent`]; `fmt` lands in a later build step.
 
+pub mod apply;
+pub mod drift;
 pub mod plan;
 pub mod range;
+pub mod refresh;
 pub mod show;
 pub mod validate;
 
+pub use apply::{ApplyPlan, ApplyReport, ApplyRequest, OpOutcome, OpResult};
+pub use drift::{DetectDrift, DriftRequest};
 pub use plan::{PlanCalendar, PlanRequest};
 pub use range::{QueryRange, RangeOccurrence};
+pub use refresh::{RefreshReport, RefreshRequest, RefreshState};
 pub use show::{EventDetail, ShowEvent, default_window};
 pub use validate::{Diagnostic, Severity, ValidateCalendar, ValidationReport};

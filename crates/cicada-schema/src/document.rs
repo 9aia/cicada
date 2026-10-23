@@ -15,6 +15,7 @@ use std::path::PathBuf;
 
 use cicada_core::domain::calendar::Calendar;
 use cicada_core::domain::ids::ZoneId;
+use cicada_core::domain::policy::SendUpdates;
 use serde::Deserialize;
 use serde::de::IgnoredAny;
 
@@ -121,6 +122,19 @@ struct SpecDoc {
     /// Declared events.
     #[serde(default)]
     events: Vec<EventSpec>,
+    /// `spec.apply:` — apply-time policy knobs (ADR-0002 §5).
+    #[serde(default)]
+    apply: ApplyDoc,
+}
+
+/// `spec.apply:` block.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ApplyDoc {
+    /// `sendUpdates: none | externalOnly | all` — default
+    /// `externalOnly` (ADR-0002 §5).
+    #[serde(default)]
+    send_updates: SendUpdates,
 }
 
 /// `kind: Manifest` body.
@@ -154,6 +168,7 @@ impl CalendarDoc {
             time_zone: zone.clone(),
             provider: metadata.provider,
             provider_calendar_id: metadata.calendar_id,
+            send_updates: spec.apply.send_updates,
             events: BTreeMap::default(),
         };
         for (i, spec) in spec.events.into_iter().enumerate() {
