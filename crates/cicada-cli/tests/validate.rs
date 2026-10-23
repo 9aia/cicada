@@ -126,8 +126,10 @@ fn missing_file_reports_in_place() {
 #[test]
 fn stub_verbs_report_unimplemented() {
     let dir = tempfile::tempdir().unwrap();
-    let out = cicada(dir.path(), &["plan"]);
-    assert!(!out.status.success());
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("not yet implemented"), "{stderr}");
+    for verb in ["apply", "drift", "refresh"] {
+        let out = cicada(dir.path(), &[verb]);
+        assert!(!out.status.success(), "{verb} should still be a stub");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("not yet implemented"), "{verb}: {stderr}");
+    }
 }

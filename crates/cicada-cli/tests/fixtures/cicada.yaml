@@ -1,0 +1,3 @@
+apiVersion: cicada/v1
+kind: Manifest
+calendars: [calendars/work.yaml]

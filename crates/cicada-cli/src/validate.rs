@@ -14,12 +14,10 @@ use std::process::ExitCode;
 
 use cicada_core::application::{Severity, ValidateCalendar};
 use cicada_core::ports::logger::{LogLevel, Logger};
-use cicada_schema::{Document, SchemaError, parse_calendar, parse_document};
+use cicada_schema::{Document, parse_calendar, parse_document};
 
+use crate::input::{MANIFEST_NAMES, render_schema_error};
 use crate::logging::ConsoleLogger;
-
-/// Manifest filenames probed when `validate` gets no arguments.
-const MANIFEST_NAMES: [&str; 2] = ["cicada.yaml", "cicada.yml"];
 
 /// A file to validate, or a discovery failure to report in place.
 enum Target {
@@ -117,18 +115,6 @@ fn validate_file(path: &Path) -> Result<Outcome, String> {
         diagnostics,
         errors,
     })
-}
-
-/// Where a `SchemaError` happened, compact: `path: msg` or
-/// `line:col: msg`.
-fn render_schema_error(e: &SchemaError) -> String {
-    if let Some(path) = &e.path {
-        format!("{}: {}", path, e.message)
-    } else if let (Some(l), Some(c)) = (e.line, e.column) {
-        format!("{l}:{c}: {}", e.message)
-    } else {
-        e.message.clone()
-    }
 }
 
 /// The full target list: explicit files (manifests expand), or the

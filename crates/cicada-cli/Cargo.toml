@@ -17,7 +17,11 @@ cicada-schema.workspace = true
 cicada-state.workspace = true
 cicada-google.workspace = true
 cicada-mcp.workspace = true
+cicada-testkit.workspace = true
 clap.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+jiff.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

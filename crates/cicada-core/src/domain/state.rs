@@ -161,7 +161,11 @@ pub struct JournalEntry {
 
 /// Per-op apply outcome.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", tag = "status")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "status"
+)]
 pub enum JournalOutcome {
     /// The remote write landed.
     Applied {

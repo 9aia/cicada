@@ -8,7 +8,18 @@
 //!
 //! Nothing in this module performs I/O: the CLI/MCP shells read files
 //! and call providers; use cases see only parsed, portable values.
+//!
+//! `cicada validate` → [`ValidateCalendar`]; `plan` →
+//! [`PlanCalendar`]; `range`/`show` → [`QueryRange`]/[`ShowEvent`];
+//! `apply`, `refresh`, `drift`, `fmt` land in later build steps
+//! against the same shape.
 
+pub mod plan;
+pub mod range;
+pub mod show;
 pub mod validate;
 
+pub use plan::{PlanCalendar, PlanRequest};
+pub use range::{QueryRange, RangeOccurrence};
+pub use show::{EventDetail, ShowEvent, default_window};
 pub use validate::{Diagnostic, Severity, ValidateCalendar, ValidationReport};

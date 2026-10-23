@@ -4,7 +4,12 @@
 
 #![forbid(unsafe_code)]
 
+mod input;
 mod logging;
+mod plan;
+mod range;
+mod show;
+mod timeparse;
 mod validate;
 
 use std::path::PathBuf;
@@ -67,10 +72,14 @@ struct ValidateArgs {
 /// `cicada plan`.
 #[derive(Debug, Args)]
 struct PlanArgs {
-    /// Provider adapter to plan against.
+    /// Calendar or manifest YAML files. Defaults to the `cicada.yaml`
+    /// manifest in the current directory.
+    files: Vec<PathBuf>,
+    /// Provider adapter to plan against (fake | google).
     #[arg(long)]
     provider: Option<String>,
-    /// Write the plan JSON here (`cicada/plan-v1`).
+    /// Write the plan JSON here (`cicada/plan-v1`); a JSON array when
+    /// more than one calendar is planned.
     #[arg(long)]
     out: Option<PathBuf>,
 }
@@ -96,13 +105,17 @@ struct ApplyArgs {
 /// `cicada range`.
 #[derive(Debug, Args)]
 struct RangeArgs {
-    /// Range start (`today`, a date, or a datetime).
+    /// Calendar or manifest YAML files. Defaults to the `cicada.yaml`
+    /// manifest in the current directory.
+    files: Vec<PathBuf>,
+    /// Range start (`today`, `+Nd`, a date, or a datetime).
     #[arg(long)]
     from: Option<String>,
     /// Range end (`+7d`, a date, or a datetime).
     #[arg(long)]
     to: Option<String>,
-    /// Expand the live provider's rules instead of local YAML.
+    /// Expand the live provider's rules instead of local YAML
+    /// (reserved — not wired yet).
     #[arg(long)]
     provider: Option<String>,
 }
@@ -112,6 +125,16 @@ struct RangeArgs {
 struct ShowArgs {
     /// Stable local id of the event.
     id: String,
+    /// Calendar or manifest YAML files. Defaults to the `cicada.yaml`
+    /// manifest in the current directory.
+    files: Vec<PathBuf>,
+    /// Occurrence window start (`today`, `+Nd`, a date, or a
+    /// datetime). With `--to`, defaults to `today`.
+    #[arg(long)]
+    from: Option<String>,
+    /// Occurrence window end (defaults to the window start + 30d).
+    #[arg(long)]
+    to: Option<String>,
 }
 
 /// `cicada fmt`.
@@ -149,13 +172,13 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some(Commands::Validate(args)) => validate::run(&args.files),
+        Some(Commands::Plan(args)) => plan::run(&args),
+        Some(Commands::Range(args)) => range::run(&args),
+        Some(Commands::Show(args)) => show::run(&args),
         Some(Commands::Init) => not_implemented("init"),
-        Some(Commands::Plan(_)) => not_implemented("plan"),
         Some(Commands::Apply(_)) => not_implemented("apply"),
         Some(Commands::Refresh) => not_implemented("refresh"),
         Some(Commands::Drift) => not_implemented("drift"),
-        Some(Commands::Range(_)) => not_implemented("range"),
-        Some(Commands::Show(_)) => not_implemented("show"),
         Some(Commands::Fmt(_)) => not_implemented("fmt"),
         Some(Commands::Provider(_)) => not_implemented("provider"),
         Some(Commands::Mcp) => not_implemented("mcp"),

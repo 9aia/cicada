@@ -12,6 +12,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::drift::DriftKind;
 use super::event::Event;
 use super::ids::{ContentHash, LocalId, RemoteId};
 
@@ -62,7 +63,11 @@ impl OpKind {
 
 /// One planned change to reconcile desired → recorded state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", tag = "kind")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "kind"
+)]
 pub enum Operation {
     /// Create `desired` remotely and record it under `local_id`.
     Create {
@@ -70,6 +75,12 @@ pub enum Operation {
         desired: Box<Event>,
         /// Hash the op was planned against.
         hash: ContentHash,
+        /// Drift-conflict marker (ADR-0002 §4) — apply fails the op
+        /// unless `--force`. Always `None` on `Create` today (no
+        /// recorded state exists to drift against); kept for a
+        /// uniform wire shape.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        conflict: Option<DriftKind>,
     },
     /// Patch the remote event in place.
     Update {
@@ -87,6 +98,9 @@ pub enum Operation {
         /// provider supports them (ADR-0002 §4).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         etag: Option<String>,
+        /// Drift-conflict marker (ADR-0002 §4).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        conflict: Option<DriftKind>,
     },
     /// Delete the remote event (local id removed from desired YAML).
     Delete {
@@ -99,6 +113,11 @@ pub enum Operation {
         /// Recorded remote ETag, for conditional deletes.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         etag: Option<String>,
+        /// Drift-conflict marker (ADR-0002 §4). A missing live event
+        /// still marks the op — the record is stale and apply wants
+        /// the user to refresh unless forced.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        conflict: Option<DriftKind>,
     },
     /// Recurrence changed — instances diverge, so delete + recreate
     /// as one op (conferencing attach is a sub-step, ADR-0001 §4).
@@ -116,6 +135,9 @@ pub enum Operation {
         /// Recorded remote ETag for conditional writes.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         etag: Option<String>,
+        /// Drift-conflict marker (ADR-0002 §4).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        conflict: Option<DriftKind>,
     },
     /// Recorded and desired agree — no remote call needed.
     NoOp {
@@ -125,6 +147,10 @@ pub enum Operation {
         remote_id: RemoteId,
         /// Recorded content hash.
         hash: ContentHash,
+        /// Drift-conflict marker — a `NoOp` can still drift (desired
+        /// == recorded but live was edited out of band).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        conflict: Option<DriftKind>,
     },
 }
 
@@ -160,6 +186,32 @@ impl Operation {
             | Self::Replace { hash, .. }
             | Self::NoOp { hash, .. } => hash,
         }
+    }
+
+    /// The drift-conflict marker the planner set, if any (ADR-0002
+    /// §4): live disagrees with recorded state for the managed event
+    /// this op touches. Apply fails conflicted ops unless `--force`.
+    pub fn conflict(&self) -> Option<&DriftKind> {
+        match self {
+            Self::Create { conflict, .. }
+            | Self::Update { conflict, .. }
+            | Self::Delete { conflict, .. }
+            | Self::Replace { conflict, .. }
+            | Self::NoOp { conflict, .. } => conflict.as_ref(),
+        }
+    }
+
+    /// Mark this op conflicted by `drift` — planner-facing; called
+    /// once per op after construction.
+    pub fn set_conflict(&mut self, drift: DriftKind) {
+        let slot = match self {
+            Self::Create { conflict, .. }
+            | Self::Update { conflict, .. }
+            | Self::Delete { conflict, .. }
+            | Self::Replace { conflict, .. }
+            | Self::NoOp { conflict, .. } => conflict,
+        };
+        *slot = Some(drift);
     }
 
     /// `calendarId + localId + opKind + contentHash` (ADR-0001 §4) —
@@ -286,6 +338,7 @@ mod tests {
                 local_id: "n".into(),
                 remote_id: "r".into(),
                 hash: hash("a"),
+                conflict: None,
             },
             Operation::Update {
                 local_id: "u".into(),
@@ -294,10 +347,12 @@ mod tests {
                 diff: EventDiff::default(),
                 hash: hash("b"),
                 etag: None,
+                conflict: None,
             },
             Operation::Create {
                 desired: Box::new(event("c")),
                 hash: hash("c"),
+                conflict: None,
             },
             Operation::Replace {
                 local_id: "rep".into(),
@@ -306,12 +361,14 @@ mod tests {
                 diff: EventDiff::default(),
                 hash: hash("d"),
                 etag: None,
+                conflict: None,
             },
             Operation::Delete {
                 local_id: "d".into(),
                 remote_id: "r".into(),
                 hash: hash("e"),
                 etag: None,
+                conflict: None,
             },
         ];
         sort_operations(&mut ops);
@@ -333,6 +390,7 @@ mod tests {
         let op = Operation::Create {
             desired: Box::new(event("standup")),
             hash: hash("abc"),
+            conflict: None,
         };
         assert_eq!(
             op.idempotency_key("primary"),
@@ -347,6 +405,7 @@ mod tests {
         let create = Operation::Create {
             desired: Box::new(event("from-event")),
             hash: hash("x"),
+            conflict: None,
         };
         assert_eq!(create.local_id().as_str(), "from-event");
         let delete = Operation::Delete {
@@ -354,8 +413,28 @@ mod tests {
             remote_id: "r".into(),
             hash: hash("y"),
             etag: None,
+            conflict: None,
         };
         assert_eq!(delete.local_id().as_str(), "gone");
         assert!(delete.is_remote());
+    }
+
+    #[test]
+    fn conflict_marks_every_variant() {
+        let mut op = Operation::NoOp {
+            local_id: "x".into(),
+            remote_id: "r".into(),
+            hash: hash("a"),
+            conflict: None,
+        };
+        assert!(op.conflict().is_none());
+        assert!(!serde_json::to_string(&op).unwrap().contains("conflict"));
+        op.set_conflict(crate::domain::drift::DriftKind::Missing);
+        assert_eq!(
+            op.conflict(),
+            Some(&crate::domain::drift::DriftKind::Missing)
+        );
+        let v = serde_json::to_value(&op).unwrap();
+        assert_eq!(v["conflict"]["kind"], "missing");
     }
 }

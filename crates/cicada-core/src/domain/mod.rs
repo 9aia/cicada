@@ -3,6 +3,7 @@
 pub mod attendee;
 pub mod calendar;
 pub mod capabilities;
+pub mod drift;
 pub mod error;
 pub mod event;
 pub mod ids;
@@ -16,6 +17,7 @@ pub mod time;
 pub use attendee::{Attendee, ResponseStatus};
 pub use calendar::Calendar;
 pub use capabilities::{ProviderCapabilities, RecurrenceCapabilities};
+pub use drift::{DriftEntry, DriftKind};
 pub use error::{CicadaError, ErrorKind, Result};
 pub use event::{Conferencing, Event, EventBody, EventTime, Transparency};
 pub use ids::{ContentHash, LocalId, RemoteId, ZoneId};

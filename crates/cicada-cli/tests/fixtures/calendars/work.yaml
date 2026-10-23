@@ -1,0 +1,27 @@
+apiVersion: cicada/v1
+kind: Calendar
+metadata:
+  name: work
+  timeZone: America/New_York
+  provider: fake
+  calendarId: primary
+spec:
+  events:
+    - id: standup
+      summary: Daily Standup
+      start: "09:00"
+      duration: 30m
+      recurrence: { freq: WEEKLY, byDay: [MO,TU,WE,TH,FR] }
+      attendees:
+        - { email: alice@example.com, required: true }
+      conferencing: meet
+      reminders: [{ popup: 10m }]
+    - id: one-on-one
+      summary: "1:1 with Sam"
+      start: "2026-01-05T14:00"
+      duration: 30m
+      recurrence: { freq: WEEKLY, byDay: [MO] }
+    - id: offsite
+      summary: Team Offsite
+      start: "2026-03-20T10:00"
+      duration: 4h
