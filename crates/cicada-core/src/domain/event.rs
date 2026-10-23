@@ -216,9 +216,22 @@ impl EventBody {
     /// diffs. This is the value stored as `cicada:state` and in
     /// recorded state.
     ///
+    /// Attendee `status` (the RSVP) is deliberately **excluded**:
+    /// it's provider-owned state — a remote accept/decline must not
+    /// change the recorded hash, or every answered invite would
+    /// manufacture `Update` ops and `Modified` drift. The status is
+    /// still stored and reported on [`crate::ports::RemoteEvent`];
+    /// it just isn't *managed* content.
+    ///
     /// # Errors
     /// [`CicadaError::Fatal`] only if serialization fails.
     pub fn content_hash(&self) -> Result<ContentHash> {
+        /// Attendee as hashed — `(email, required)` only; see above.
+        #[derive(Serialize)]
+        struct CanonicalAttendee<'a> {
+            email: &'a str,
+            required: bool,
+        }
         #[derive(Serialize)]
         struct Canonical<'a> {
             summary: &'a str,
@@ -226,13 +239,20 @@ impl EventBody {
             location: Option<&'a str>,
             time: &'a EventTime,
             recurrence: Option<String>,
-            attendees: Vec<&'a Attendee>,
+            attendees: Vec<CanonicalAttendee<'a>>,
             reminders: Vec<&'a Reminder>,
             conferencing: Option<String>,
             transparency: Transparency,
         }
-        let mut attendees: Vec<&Attendee> = self.attendees.iter().collect();
-        attendees.sort_by(|a, b| a.email.cmp(&b.email));
+        let mut attendees: Vec<CanonicalAttendee<'_>> = self
+            .attendees
+            .iter()
+            .map(|a| CanonicalAttendee {
+                email: a.email.as_str(),
+                required: a.required,
+            })
+            .collect();
+        attendees.sort_by(|a, b| a.email.cmp(b.email));
         let mut reminders: Vec<&Reminder> = self.reminders.iter().collect();
         reminders.sort_by_key(|r| (r.kind, r.offset.as_nanos()));
         let canonical = Canonical {
@@ -406,6 +426,27 @@ mod tests {
         ];
         assert_eq!(a.content_hash().unwrap(), b.content_hash().unwrap());
         b.summary = "Sync".into();
+        assert_ne!(a.content_hash().unwrap(), b.content_hash().unwrap());
+    }
+
+    #[test]
+    fn content_hash_ignores_rsvp_status() {
+        // RSVP status is provider-owned: a remote accept/decline must
+        // not perturb the managed hash.
+        let mut a = body();
+        let mut b = body();
+        a.attendees = vec![Attendee {
+            email: "alice@x.com".into(),
+            required: true,
+            status: ResponseStatus::NeedsAction,
+        }];
+        b.attendees = vec![Attendee {
+            email: "alice@x.com".into(),
+            required: true,
+            status: ResponseStatus::Accepted,
+        }];
+        assert_eq!(a.content_hash().unwrap(), b.content_hash().unwrap());
+        b.attendees[0].required = false;
         assert_ne!(a.content_hash().unwrap(), b.content_hash().unwrap());
     }
 

@@ -100,6 +100,11 @@ impl RefreshState {
         // Collect first — recorded.events can't be mutated while
         // iterated.
         let mut updates: Vec<LocalId> = Vec::new();
+        // Cosmetic churn — an etag bump with unchanged managed content
+        // (RSVP flip, unmodeled provider field) — isn't drift, but the
+        // recorded etag should still track live so the etag-equal
+        // check in `detect_drift` stays authoritative.
+        let mut etag_resyncs: Vec<LocalId> = Vec::new();
         for (local_id, rec) in &recorded.events {
             let live = live_by_remote.get(rec.remote_id.as_str()).copied();
             match detect_drift(local_id, rec, live) {
@@ -121,7 +126,12 @@ impl RefreshState {
                         updates.push(local_id.clone());
                     }
                 }
-                None => report.unchanged += 1,
+                None => {
+                    if live.is_some_and(|l| l.etag != rec.etag) {
+                        etag_resyncs.push(local_id.clone());
+                    }
+                    report.unchanged += 1;
+                }
             }
         }
 
@@ -145,6 +155,15 @@ impl RefreshState {
                 .unwrap_or_else(|| entry.hash.clone());
             entry.etag.clone_from(&live.etag);
             report.updated.push(local_id);
+        }
+        for local_id in etag_resyncs {
+            let Some(entry) = recorded.events.get_mut(&local_id) else {
+                continue;
+            };
+            let Some(live) = live_by_remote.get(entry.remote_id.as_str()).copied() else {
+                continue;
+            };
+            entry.etag.clone_from(&live.etag);
         }
 
         // Adoption candidates: cicada:*-tagged live events recorded

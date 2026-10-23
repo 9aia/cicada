@@ -125,12 +125,22 @@ fn push_opt(
     }
 }
 
-/// Attendee lists compare as sets keyed on email (order is noise).
+/// Attendee lists compare as `(email, required)` sets — order and
+/// RSVP `status` are noise. The response belongs to the provider,
+/// not to desired state: a remote accept/decline must not produce
+/// an `Update` op (same decision as [`EventBody::content_hash`],
+/// which excludes status from the managed hash). The status still
+/// rides along on `RemoteEvent` for display.
+///
+/// [`EventBody::content_hash`]: crate::domain::event::EventBody::content_hash
 fn same_attendees(a: &[Attendee], b: &[Attendee]) -> bool {
-    let mut a: Vec<&Attendee> = a.iter().collect();
-    let mut b: Vec<&Attendee> = b.iter().collect();
-    a.sort_by(|x, y| x.email.cmp(&y.email));
-    b.sort_by(|x, y| x.email.cmp(&y.email));
+    fn key(a: &Attendee) -> (&str, bool) {
+        (a.email.as_str(), a.required)
+    }
+    let mut a: Vec<(&str, bool)> = a.iter().map(key).collect();
+    let mut b: Vec<(&str, bool)> = b.iter().map(key).collect();
+    a.sort_unstable();
+    b.sort_unstable();
     a == b
 }
 
@@ -249,6 +259,29 @@ mod tests {
         y.attendees = vec![a2, a1];
         assert!(EventDiffer.diff(&x, &y).unwrap().is_empty());
         y.attendees.pop();
+        let d = EventDiffer.diff(&x, &y).unwrap();
+        assert_eq!(d.changes[0].field, EventField::Attendees);
+    }
+
+    #[test]
+    fn attendee_rsvp_status_is_not_a_diff() {
+        // A remote accept/decline only flips `status` — provider-owned
+        // state that must not produce an Update.
+        let mut x = body();
+        let mut y = body();
+        x.attendees = vec![Attendee {
+            email: "a@x".into(),
+            required: true,
+            status: ResponseStatus::NeedsAction,
+        }];
+        y.attendees = vec![Attendee {
+            email: "a@x".into(),
+            required: true,
+            status: ResponseStatus::Accepted,
+        }];
+        assert!(EventDiffer.diff(&x, &y).unwrap().is_empty());
+        // …but `required` is desired state and still diffs.
+        y.attendees[0].required = false;
         let d = EventDiffer.diff(&x, &y).unwrap();
         assert_eq!(d.changes[0].field, EventField::Attendees);
     }

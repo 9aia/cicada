@@ -242,15 +242,6 @@ pub(crate) fn detect_drift(
     let Some(live) = live else {
         return Some(DriftKind::Missing);
     };
-    // ETags are authoritative where both sides expose one — a bump
-    // means the live event changed even if the content hash would
-    // still line up (providers mutate fields we don't model).
-    if let (Some(recorded), Some(current)) = (&rec.etag, &live.etag) {
-        return (recorded != current).then(|| DriftKind::Modified {
-            recorded_hash: rec.hash.clone(),
-            live_hash: live_content_hash(local_id, &live.body),
-        });
-    }
     let live_hash = live_content_hash(local_id, &live.body);
     // A `cicada:state` tag that disagrees with the record means the
     // remote tags were rewritten out of band (or state was rebuilt
@@ -260,6 +251,27 @@ pub(crate) fn detect_drift(
         .state_hash
         .as_ref()
         .is_some_and(|h| *h != rec.hash);
+    if let (Some(recorded), Some(current)) = (&rec.etag, &live.etag) {
+        if recorded == current {
+            // Both sides expose an etag and it matches — authoritative
+            // "nothing changed".
+            return None;
+        }
+        // An etag bump alone is NOT drift: providers bump it for
+        // cosmetic, unmanaged mutations — attendee `responseStatus`
+        // flips (RSVPs are provider-owned state, see
+        // `EventBody::content_hash`) and fields cicada doesn't model.
+        // Flagging those manufactures drift entries and conflicted
+        // ops every time an invitee answers. Only a normalized-body
+        // difference — or rewritten `cicada:state` tags — counts.
+        if live_hash.as_ref() == Some(&rec.hash) && !tag_mismatch {
+            return None;
+        }
+        return Some(DriftKind::Modified {
+            recorded_hash: rec.hash.clone(),
+            live_hash,
+        });
+    }
     if live_hash.as_ref() != Some(&rec.hash) || tag_mismatch {
         return Some(DriftKind::Modified {
             recorded_hash: rec.hash.clone(),
@@ -620,6 +632,56 @@ mod tests {
             .plan(&input(&cal, Some(&recorded), &[live], &caps))
             .unwrap();
         assert!(plan.drift.is_empty());
+    }
+
+    #[test]
+    fn rsvp_flip_is_not_drift_even_with_etag_bump() {
+        // An attendee answering an invite flips responseStatus and
+        // bumps the etag — provider-owned state, cosmetic churn. No
+        // drift, no conflicted op.
+        let mut applied_body = body("Standup");
+        applied_body.attendees = vec![crate::domain::attendee::Attendee {
+            email: "a@x.com".into(),
+            required: true,
+            status: crate::domain::attendee::ResponseStatus::NeedsAction,
+        }];
+        let applied = event("standup", applied_body);
+        let (rec, _) = record_for(&applied);
+        let mut recorded = RecordedCalendar::default();
+        recorded.events.insert("standup".into(), rec.clone());
+
+        let mut live = live_for(&applied, &rec);
+        live.body.attendees[0].status = crate::domain::attendee::ResponseStatus::Accepted;
+        live.etag = Some("etag-2".into()); // providers bump on RSVP
+
+        let cal = calendar(vec![applied]);
+        let caps = ProviderCapabilities::permissive();
+        let plan = OperationPlanner
+            .plan(&input(&cal, Some(&recorded), &[live], &caps))
+            .unwrap();
+        assert!(plan.drift.is_empty());
+        assert_eq!(plan.ops[0].kind(), OpKind::NoOp);
+        assert!(plan.ops[0].conflict().is_none());
+    }
+
+    #[test]
+    fn etag_bump_with_content_change_still_drifts() {
+        // The etag fast-path must not hide real edits.
+        let applied = event("standup", body("Standup"));
+        let (rec, _) = record_for(&applied);
+        let mut recorded = RecordedCalendar::default();
+        recorded.events.insert("standup".into(), rec.clone());
+        let mut live = live_for(&applied, &rec);
+        live.body.summary = "Edited remotely".into();
+        live.etag = Some("etag-2".into());
+
+        let cal = calendar(vec![applied]);
+        let caps = ProviderCapabilities::permissive();
+        let plan = OperationPlanner
+            .plan(&input(&cal, Some(&recorded), &[live], &caps))
+            .unwrap();
+        assert_eq!(plan.drift.len(), 1);
+        assert!(matches!(plan.drift[0].kind(), DriftKind::Modified { .. }));
     }
 
     #[test]
