@@ -1,0 +1,10 @@
+[alias]
+xtask = "run --package xtask --"
+
+# The machine-global ~/.cargo/config.toml caps builds at `jobs = 2`
+# (a disk-contention guard). Override per-workspace.
+[build]
+jobs = 6
+# Compile cache (sccache) — install once, every build reuses artifacts.
+# Disable by deleting this line.
+rustc-wrapper = "sccache"

@@ -1,0 +1,11 @@
+# Rust
+target/
+**/*.rs.bk
+
+# misc
+*.log
+.history_*.md
+.hook-cache/
+
+# toolchain noise
+node_modules/

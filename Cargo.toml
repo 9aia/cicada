@@ -1,0 +1,93 @@
+[workspace]
+resolver = "2"
+members = ["crates/*", "xtask"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.85"
+repository = "https://github.com/9aia/cicada"
+license = "MIT"
+
+[workspace.dependencies]
+# Internal crates.
+cicada-core = { path = "crates/cicada-core" }
+cicada-schema = { path = "crates/cicada-schema" }
+cicada-state = { path = "crates/cicada-state" }
+cicada-google = { path = "crates/cicada-google" }
+cicada-mcp = { path = "crates/cicada-mcp" }
+cicada-testkit = { path = "crates/cicada-testkit" }
+
+# External dependencies — pin conservative majors/minors.
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+thiserror = "2.0"
+async-trait = "0.1"
+tokio = { version = "1", features = [
+  "signal",
+  "macros",
+  "rt-multi-thread",
+  "io-util",
+  "io-std",
+  "sync",
+  "time",
+] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+anyhow = "1.0"
+clap = { version = "4", features = ["derive"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+# Hard gates: deny classes that hide real bugs.
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+perf = { level = "deny", priority = -1 }
+# Warn-level signal, fixed as we go.
+style = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+# Pedantic lints that cost more than they catch here.
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+module_name_repetitions = "allow"
+doc_markdown = "allow"
+similar_names = "allow"
+too_many_lines = "allow"
+cast_precision_loss = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_lossless = "allow"
+struct_excessive_bools = "allow"
+
+[profile.dev]
+# Line tables only: backtraces still symbolize, but test-binary links
+# and disk usage drop sharply.
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false # dependencies don't need debuginfo
+
+[profile.test]
+debug = "line-tables-only"
+
+[profile.test.package."*"]
+debug = false
+
+[profile.release]
+# Thin LTO for local `cargo xtask install` — shipped binaries go
+# through `cargo build --profile dist` (release.yml).
+lto = "thin"
+strip = true
+panic = "unwind" # keep unwind: tests + tokio supervise panics
+
+[profile.dist]
+# What we ship: maximum optimization, one codegen unit.
+inherits = "release"
+lto = "fat"
+codegen-units = 1

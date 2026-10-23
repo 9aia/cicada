@@ -1,0 +1,1 @@
+//! Domain + application + ports — pure, no I/O. Calendar, Event, Recurrence, Attendee, Reminder, EventDiffer, RecurrenceExpander, CapabilityChecker, OperationPlanner; ports: CalendarProvider, StateStore, AuthProvider, Clock, Logger, SecretStore, Http.

@@ -1,0 +1,22 @@
+[package]
+name = "cicada-cli"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "cicada"
+path = "src/main.rs"
+
+[dependencies]
+cicada-core.workspace = true
+cicada-schema.workspace = true
+cicada-state.workspace = true
+cicada-google.workspace = true
+cicada-mcp.workspace = true
+
+[lints]
+workspace = true
