@@ -8,7 +8,15 @@ license.workspace = true
 publish = false
 
 [dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+jiff.workspace = true
+sha2.workspace = true
 
+[dev-dependencies]
+serde_yaml.workspace = true
 
 [lints]
 workspace = true

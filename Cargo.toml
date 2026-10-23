@@ -23,6 +23,11 @@ serde_json = "1.0"
 serde_yaml = "0.9"
 thiserror = "2.0"
 async-trait = "0.1"
+# Time: wall-time + IANA zones in the pure core. jiff 0.2.38 (Oct 2026)
+# is >7 days old; floor pinned conservative.
+jiff = { version = "0.2.35", features = ["serde"] }
+# Content hashes for recorded state / idempotency keys.
+sha2 = "0.10"
 tokio = { version = "1", features = [
   "signal",
   "macros",
