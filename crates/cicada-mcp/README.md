@@ -61,5 +61,6 @@ errors, with the ADR-0002 §8 class attached:
 
 `--provider fake` (default) uses the file-backed `FakeFileProvider`
 — the full lifecycle is testable/demoable without Google.
-`--provider google` fails with a clear not-implemented error until
-the adapter lands.
+`--provider google` uses the live Calendar API; credentials come
+from `cicada provider add google` or the `CICADA_GOOGLE_*` env vars
+(see `GoogleAuthConfig::from_env`).

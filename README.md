@@ -154,15 +154,27 @@ xtask/               cargo xtask check|test|install
 
 ## Status
 
-Early. Architecture is decided
-([ADR-0001](project/adrs/0001-foundational-architecture.md)) and the
-reconciliation contracts are pinned
-([ADR-0002](project/adrs/0002-reconciliation-contracts.md)) — managed
-boundary, remote tagging, safe resume, conflict and notification
-policy, versioned state/plan formats. Implementation is in progress.
-Google Calendar is the first provider; Teams, CalDAV, and others follow
-via the same `CalendarProvider` port. MCP ships alongside the CLI, not
-after it.
+v0.1 feature-complete. Everything works end-to-end against the
+file-backed `fake` provider (`--provider fake`, the default):
+`init` → `validate` → `plan` → `apply` → `drift`/`refresh` →
+`range`/`show` → `fmt`, plus `cicada mcp` serving the same use cases
+over stdio with a confirmation-gated `plan.apply`.
+
+Google Calendar is implemented (auth: service-account JWT, OAuth
+installed app, static token; Calendar API v3 + Meet; etag
+conditional writes; `sendUpdates`) and exercised by HTTP-fixture
+tests — live runs are credential-gated:
+
+```sh
+cicada provider add google                          # OAuth loopback/paste flow
+cicada provider add google --service-account key.json
+cicada plan --provider google
+```
+
+Env credentials (`GOOGLE_APPLICATION_CREDENTIALS`,
+`CICADA_GOOGLE_CLIENT_ID`/`_SECRET` + refresh token,
+`CICADA_GOOGLE_ACCESS_TOKEN`) also work and take precedence. Teams,
+CalDAV, and others follow via the same `CalendarProvider` port.
 
 ## Development
 
