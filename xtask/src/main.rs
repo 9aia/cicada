@@ -21,6 +21,16 @@ fn nextest_available() -> bool {
     }
 }
 
+/// True when the `cargo-llvm-cov` subcommand is installed.
+fn llvm_cov_available() -> bool {
+    Command::new("cargo")
+        .args(["llvm-cov", "--version"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
 fn main() -> anyhow::Result<()> {
     match std::env::args().nth(1).as_deref() {
         Some("check") => {
@@ -64,8 +74,52 @@ fn main() -> anyhow::Result<()> {
                 std::fs::copy(&src, &dst)?;
             }
         }
+        // `cargo xtask coverage [llvm-cov args…]` — HTML report under
+        // target/llvm-cov/html plus a printed summary. Extra args pass
+        // through to cargo-llvm-cov (e.g. `--fail-under-lines 100`,
+        // `--lcov --output-path lcov.info` for CI upload); passing any
+        // report flag replaces the default --html.
+        Some("coverage") => {
+            anyhow::ensure!(
+                llvm_cov_available(),
+                "cargo-llvm-cov not installed — `cargo install cargo-llvm-cov` \
+                 (needs the llvm-tools rustup component)"
+            );
+            // Same runner as `xtask test` so coverage sees the same
+            // test selection/isolation (nextest partitions, its
+            // .config/nextest.toml filters).
+            let extra: Vec<String> = std::env::args().skip(2).collect();
+            let wants_report = extra.iter().any(|a| {
+                matches!(
+                    a.as_str(),
+                    "--text"
+                        | "--summary-only"
+                        | "--json"
+                        | "--lcov"
+                        | "--cobertura"
+                        | "--codecov"
+                        | "--open"
+                )
+            });
+            let mut args: Vec<String> = vec!["llvm-cov".into()];
+            if nextest_available() {
+                args.push("nextest".into());
+                // An empty suite (scaffold phase) is a pass, matching
+                // `xtask test` — nextest exits 4 on "no tests to run".
+                args.push("--no-tests=pass".into());
+            }
+            args.push("--workspace".into());
+            args.push("--exclude".into());
+            args.push("xtask".into());
+            if !wants_report {
+                args.push("--html".into());
+            }
+            args.extend(extra);
+            let status = Command::new("cargo").args(&args).status()?;
+            anyhow::ensure!(status.success(), "cargo {} failed", args.join(" "));
+        }
         other => {
-            eprintln!("usage: cargo xtask <check|test|install> (got {other:?})");
+            eprintln!("usage: cargo xtask <check|test|install|coverage> (got {other:?})");
             std::process::exit(2);
         }
     }

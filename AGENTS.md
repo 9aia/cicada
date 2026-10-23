@@ -35,6 +35,8 @@ implicit.
 cargo xtask check          # fmt + clippy -D warnings
 cargo xtask test           # whole suite (nextest if present)
 cargo xtask install        # release-build cicada + cicada-mcp → ~/.local/bin
+cargo xtask coverage       # llvm-cov report (HTML → target/llvm-cov/html);
+                           # extra args pass through, e.g. --fail-under-lines 100
 ```
 
 Git hooks live in `.hooks/` (`core.hooksPath` = `.hooks`):
