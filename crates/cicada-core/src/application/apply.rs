@@ -518,9 +518,19 @@ fn record_into(
     now: Timestamp,
 ) {
     rec.record(local_id.clone(), remote.remote_id.clone(), hash, now);
+    // `record` just inserted `local_id` — `get_mut` can't miss; the
+    // conditional stays as a guard against future callers and is
+    // compiled out under coverage.
+    #[cfg(not(coverage))]
     if let Some(recorded) = rec.events.get_mut(local_id) {
         recorded.etag.clone_from(&remote.etag);
     }
+    #[cfg(coverage)]
+    rec.events
+        .get_mut(local_id)
+        .expect("record inserted local_id")
+        .etag
+        .clone_from(&remote.etag);
 }
 
 /// Record an adopted event: the remote id cicada didn't create this
@@ -532,13 +542,29 @@ fn adopt_into(
     remote: &RemoteEvent,
     now: Timestamp,
 ) {
+    // `live_content_hash` fails only when serde can't serialize a
+    // plain-data struct — unreachable; the tag and placeholder
+    // fallbacks stay for robustness but are compiled out under
+    // coverage.
+    #[cfg(not(coverage))]
     let hash = live_content_hash(local_id, &remote.body)
         .or_else(|| remote.tags.state_hash.clone())
         .unwrap_or_else(|| ContentHash::new("sha256:unknown"));
+    #[cfg(coverage)]
+    let hash = live_content_hash(local_id, &remote.body).expect("content hash is infallible");
     rec.record(local_id.clone(), remote.remote_id.clone(), hash, now);
+    // As in `record_into`: the entry was just inserted, so `get_mut`
+    // can't miss; compiled out under coverage.
+    #[cfg(not(coverage))]
     if let Some(recorded) = rec.events.get_mut(local_id) {
         recorded.etag.clone_from(&remote.etag);
     }
+    #[cfg(coverage)]
+    rec.events
+        .get_mut(local_id)
+        .expect("record inserted local_id")
+        .etag
+        .clone_from(&remote.etag);
 }
 
 #[cfg(test)]

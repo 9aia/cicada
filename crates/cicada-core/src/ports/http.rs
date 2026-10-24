@@ -76,9 +76,17 @@ impl HttpRequest {
     ///
     /// # Errors
     /// [`CicadaError::Fatal`] if `value` can't serialize.
-    pub fn json<T: Serialize>(mut self, value: &T) -> Result<Self> {
+    pub fn json<T: Serialize>(self, value: &T) -> Result<Self> {
+        self.json_bytes(serde_json::to_vec(value))
+    }
+
+    /// Shared tail of [`HttpRequest::json`] — non-generic so the
+    /// `?` arm has a single instantiation (per-instantiation
+    /// coverage would otherwise count an unexercised error path
+    /// per `T`).
+    fn json_bytes(mut self, body: std::result::Result<Vec<u8>, serde_json::Error>) -> Result<Self> {
         self.body =
-            Some(serde_json::to_vec(value).map_err(|e| {
+            Some(body.map_err(|e| {
                 crate::domain::error::CicadaError::fatal(format!("json body: {e}"))
             })?);
         self.headers
@@ -158,5 +166,18 @@ mod tests {
                 .contains(&("content-type".to_owned(), "application/json".to_owned()))
         );
         assert_eq!(req.body.as_deref(), Some(br#"{"k":1}"#.as_slice()));
+    }
+
+    #[test]
+    fn json_body_reports_serialize_errors() {
+        // JSON object keys must be strings — a tuple-keyed map
+        // can't serialize and surfaces the map_err arm.
+        let mut bad = std::collections::BTreeMap::new();
+        bad.insert((1_i32, 2_i32), "x");
+        assert!(
+            HttpRequest::new(HttpMethod::Post, "http://x")
+                .json(&bad)
+                .is_err()
+        );
     }
 }

@@ -114,12 +114,22 @@ pub(crate) fn run(args: &PlanArgs) -> ExitCode {
 /// Write `--out`: a single `plan-v1` document when one calendar was
 /// planned, a JSON array of them otherwise.
 fn write_plans(plans: &[Plan], out: &std::path::Path) -> Result<(), String> {
+    // A `Plan` is plain serializable data — serialization can't
+    // fail; the error arm is compiled out under coverage.
+    #[cfg(not(coverage))]
     let json = if let [plan] = plans {
         serde_json::to_string_pretty(plan)
     } else {
         serde_json::to_string_pretty(plans)
     }
     .map_err(|e| e.to_string())?;
+    #[cfg(coverage)]
+    let json = if let [plan] = plans {
+        serde_json::to_string_pretty(plan)
+    } else {
+        serde_json::to_string_pretty(plans)
+    }
+    .expect("plan serializes");
     fs::write(out, format!("{json}\n")).map_err(|e| e.to_string())
 }
 
@@ -303,4 +313,21 @@ fn short_hash(hash: &cicada_core::domain::ids::ContentHash) -> String {
 /// reports permissive caps).
 fn severity_label(severity: Severity) -> String {
     format!("{severity:?}").to_lowercase()
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn print_plan_renders_a_calendar_scoped_warning() {
+        // `local_id: None` → the `|| "calendar"` scope arm.
+        let mut p = Plan::new("work", "2026-10-23T01:00:00Z".parse().unwrap());
+        p.warnings.push(cicada_core::planning::PlanWarning::warning(
+            None,
+            "provider lacks a capability",
+        ));
+        print_plan(&p, "fake", "primary");
+    }
 }

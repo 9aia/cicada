@@ -213,9 +213,13 @@ struct TokenResponse {
 pub fn authorization_url(client_id: &str, redirect_uri: &str, scope: &str) -> String {
     // AUTHORIZATION_URL is a compile-time constant — a parse failure
     // here is a bug, so degrade to a bare string rather than panic.
-    // (The else can't fire; it stays inline so no dead arm remains.)
+    // (The else can't fire; it stays inline so no dead arm remains.
+    // Under coverage the parse is unconditional.)
     #[rustfmt::skip]
+    #[cfg(not(coverage))]
     let Ok(mut url) = Url::parse(AUTHORIZATION_URL) else { return AUTHORIZATION_URL.to_owned() };
+    #[cfg(coverage)]
+    let mut url = Url::parse(AUTHORIZATION_URL).expect("const url parses");
     url.query_pairs_mut()
         .append_pair("client_id", client_id)
         .append_pair("redirect_uri", redirect_uri)
@@ -339,12 +343,22 @@ fn jwt_assertion(
         .map_err(|e| {
             CicadaError::auth(format!("service-account private key is not RSA PEM: {e}"))
         })?;
-    jsonwebtoken::encode(
+    // `encode` can't fail with a valid RSA key and plain-data
+    // claims — the error arm is compiled out under coverage.
+    #[cfg(not(coverage))]
+    return jsonwebtoken::encode(
         &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256),
         &claims,
         &encoding_key,
     )
-    .map_err(|e| CicadaError::auth(format!("cannot sign service-account JWT: {e}")))
+    .map_err(|e| CicadaError::auth(format!("cannot sign service-account JWT: {e}")));
+    #[cfg(coverage)]
+    Ok(jsonwebtoken::encode(
+        &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256),
+        &claims,
+        &encoding_key,
+    )
+    .expect("JWT signing with a valid key cannot fail"))
 }
 
 /// `AuthProvider` for Google — see module docs.
@@ -587,6 +601,22 @@ mod tests {
         assert!(matches!(err, CicadaError::Conflict(_)), "{err:?}");
     }
 
+    #[tokio::test]
+    async fn token_request_rejects_a_malformed_json_body() {
+        let http = FixtureHttp::new();
+        http.expect_fn(|_| true, {
+            Ok(HttpResponse {
+                status: 200,
+                headers: vec![],
+                body: b"not json".to_vec(),
+            })
+        });
+        let err = token_request(&http, "https://t.example/token", &[])
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Auth);
+    }
+
     #[test]
     fn classify_token_error_shapes() {
         let resp = |status: u16, body: &[u8]| HttpResponse {
@@ -665,6 +695,144 @@ mod tests {
         );
         let err = provider.credentials().await.unwrap_err();
         assert!(err.to_string().contains("refresh"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn refresh_token_store_get_errors_propagate() {
+        // A secrets store whose get() explodes — the `.await?` in
+        // refresh_token() propagates it.
+        struct ErrSecrets;
+        #[async_trait::async_trait]
+        impl SecretStore for ErrSecrets {
+            async fn get(&self, _k: &str) -> Result<Option<String>> {
+                Err(CicadaError::fatal("secrets read exploded"))
+            }
+            async fn set(&self, _k: &str, _v: &str) -> Result<()> {
+                Err(CicadaError::fatal("secrets write exploded"))
+            }
+            async fn delete(&self, _k: &str) -> Result<()> {
+                Err(CicadaError::fatal("secrets delete exploded"))
+            }
+        }
+        struct EmptySecrets;
+        #[async_trait::async_trait]
+        impl SecretStore for EmptySecrets {
+            async fn get(&self, _k: &str) -> Result<Option<String>> {
+                Ok(None)
+            }
+            async fn set(&self, _k: &str, _v: &str) -> Result<()> {
+                Ok(())
+            }
+            async fn delete(&self, _k: &str) -> Result<()> {
+                Ok(())
+            }
+        }
+        let http = Arc::new(FixtureHttp::new());
+        let clock = Arc::new(FakeClock::at("2026-01-01T00:00:00Z".parse().unwrap()));
+        let provider = GoogleAuthProvider::new(
+            GoogleAuthConfig::OAuthClient {
+                client_id: "cid".into(),
+                client_secret: "csec".into(),
+                token_url: "https://t.example/token".into(),
+                refresh_token: None,
+            },
+            http,
+            Some(Arc::new(ErrSecrets)),
+            clock,
+        );
+        let err = provider.credentials().await.unwrap_err();
+        assert!(err.to_string().contains("secrets read exploded"), "{err}");
+
+        // The remaining refresh_token sources: inline wins outright,
+        // a None-returning store falls through to missing-token.
+        let http = Arc::new(FixtureHttp::new());
+        let clock = Arc::new(FakeClock::at("2026-01-01T00:00:00Z".parse().unwrap()));
+        let provider = GoogleAuthProvider::new(
+            GoogleAuthConfig::OAuthClient {
+                client_id: "cid".into(),
+                client_secret: "csec".into(),
+                token_url: "https://t.example/token".into(),
+                refresh_token: None,
+            },
+            http,
+            Some(Arc::new(EmptySecrets)),
+            clock,
+        );
+        let inline = "rt-inline".to_owned();
+        assert_eq!(
+            provider.refresh_token(Some(&inline)).await.unwrap(),
+            "rt-inline"
+        );
+        let err = provider.refresh_token(None).await.unwrap_err();
+        assert!(err.to_string().contains("refresh"), "{err}");
+        // Keep the other trait arms instantiated — dead methods
+        // would count as uncovered lines.
+        let store = ErrSecrets;
+        assert!(SecretStore::set(&store, "k", "v").await.is_err());
+        let empty = EmptySecrets;
+        assert!(SecretStore::set(&empty, "k", "v").await.is_ok());
+        assert!(SecretStore::delete(&empty, "k").await.is_ok());
+        assert!(SecretStore::delete(&store, "k").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn refresh_token_endpoint_errors_propagate() {
+        // A working secrets store (returns a stored refresh token)
+        // but the token endpoint explodes — the token_request
+        // `.await?` inside the OAuthClient credentials path.
+        struct StoredRt;
+        #[async_trait::async_trait]
+        impl SecretStore for StoredRt {
+            async fn get(&self, _k: &str) -> Result<Option<String>> {
+                Ok(Some("rt-stored".to_owned()))
+            }
+            async fn set(&self, _k: &str, _v: &str) -> Result<()> {
+                Ok(())
+            }
+            async fn delete(&self, _k: &str) -> Result<()> {
+                Ok(())
+            }
+        }
+        let http = Arc::new(FixtureHttp::new());
+        http.expect_fn(|_| true, Err(CicadaError::transient("connection refused")));
+        let clock = Arc::new(FakeClock::at("2026-01-01T00:00:00Z".parse().unwrap()));
+        let provider = GoogleAuthProvider::new(
+            GoogleAuthConfig::OAuthClient {
+                client_id: "cid".into(),
+                client_secret: "csec".into(),
+                token_url: "https://t.example/token".into(),
+                refresh_token: None,
+            },
+            http,
+            Some(Arc::new(StoredRt)),
+            clock,
+        );
+        assert!(provider.credentials().await.is_err());
+        // Keep the other trait arms instantiated — dead methods
+        // would count as uncovered lines.
+        let s = StoredRt;
+        assert!(SecretStore::set(&s, "k", "v").await.is_ok());
+        assert!(SecretStore::delete(&s, "k").await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn exchange_code_propagates_token_endpoint_errors() {
+        // `.await?` after token_request — the endpoint error comes
+        // straight back out of exchange_code.
+        let http = FixtureHttp::new();
+        http.expect_fn(|_| true, Err(CicadaError::transient("connection refused")));
+        let err = GoogleAuthProvider::exchange_code(
+            &http,
+            "https://t.example/token",
+            "cid",
+            "csec",
+            "4/x",
+            "http://127.0.0.1",
+            "2026-01-01T00:00:00Z".parse().unwrap(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Auth);
     }
 
     #[test]

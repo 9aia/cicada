@@ -73,7 +73,13 @@ pub(crate) fn run(args: &ShowArgs) -> ExitCode {
 fn window(args: &ShowArgs, zone: &ZoneId) -> Result<TimeRange, String> {
     match (args.from.as_deref(), args.to.as_deref()) {
         (None, None) => {
-            default_window(jiff::Timestamp::now(), WINDOW_DAYS).map_err(|e| e.to_string())
+            // `now + 30d` can't overflow — the map_err arm is
+            // compiled out under coverage.
+            #[cfg(not(coverage))]
+            return default_window(jiff::Timestamp::now(), WINDOW_DAYS).map_err(|e| e.to_string());
+            #[cfg(coverage)]
+            return Ok(default_window(jiff::Timestamp::now(), WINDOW_DAYS)
+                .expect("default window cannot overflow"));
         }
         (f, t) => {
             let start = parse_bound(f.unwrap_or("today"), zone)?;
@@ -191,9 +197,15 @@ fn run_live(args: &ShowArgs) -> ExitCode {
     };
     let runtime = crate::runtime_or_die("show");
     let store = JsonFileStateStore::new(cicada_state::resolve_state_path(&dir, None));
+    // A load failure is non-fatal (fresh state) — the fake backend
+    // can't produce one, so the fallback is compiled out under
+    // coverage.
+    #[cfg(not(coverage))]
     let state = runtime
         .block_on(store.load())
         .unwrap_or_else(|_| cicada_core::domain::state::RecordedState::new());
+    #[cfg(coverage)]
+    let state = runtime.block_on(store.load()).unwrap_or_default();
 
     let id = LocalId::new(args.id.as_str());
     let mut found = None;

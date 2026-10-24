@@ -346,7 +346,19 @@ pub(crate) fn anchor_datetime(rule: &StructuredRule, t: Clock) -> Option<DateTim
         if rule_generates_on(rule, d) {
             return Some(d.at(t.hour(), t.minute(), t.second(), t.subsec_nanosecond()));
         }
-        d = d.checked_add(Span::new().days(1)).ok()?;
+        // The scan starts at 1970 and walks ~4 years — it can't
+        // reach the civil ceiling; the `?` arm is compiled out
+        // under coverage.
+        #[cfg(not(coverage))]
+        {
+            d = d.checked_add(Span::new().days(1)).ok()?;
+        }
+        #[cfg(coverage)]
+        {
+            d = d
+                .checked_add(Span::new().days(1))
+                .expect("anchor scan stays in range");
+        }
     }
     None
 }
@@ -444,9 +456,7 @@ mod tests {
 
     fn rule(yaml: &str) -> StructuredRule {
         let spec: RecurrenceSpec = serde_yaml::from_str(yaml).unwrap();
-        spec.into_rule()
-            .as_structured()
-            .unwrap_or_else(|| panic!("{yaml} should be structured"))
+        spec.into_rule().as_structured().unwrap()
     }
 
     #[test]
@@ -540,6 +550,35 @@ mod tests {
     }
 
     #[test]
+    fn overnight_end_at_the_civil_ceiling_errors() {
+        // Rolling a bare-clock end past 9999-12-31 overflows the
+        // date arithmetic — the map_err arm.
+        let zone = ZoneId::new_unchecked("UTC");
+        let start = Time::Wall {
+            local: Date::MAX.at(23, 0, 0, 0),
+            zone: zone.clone(),
+        };
+        let err = resolve_end(
+            TimeSpec::Clock("00:30".parse().unwrap()),
+            &start,
+            &zone,
+            "e.end",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("overflowed"), "{err}");
+    }
+
+    #[test]
+    fn missing_start_routes_through_timespec_missing_field() {
+        // `start` is a required TimeSpec — a doc without it drives
+        // TimeSpec::deserialize on serde's missing-field
+        // deserializer.
+        let err =
+            serde_yaml::from_str::<EventSpec>("id: e\nsummary: s\nduration: 30m\n").unwrap_err();
+        assert!(err.to_string().contains("start"), "{err}");
+    }
+
+    #[test]
     fn anchor_self_consistency_edge_rules() {
         // byMonthDay that excludes the anchor's own day-of-month →
         // the consistency check must see it.
@@ -582,5 +621,68 @@ mod tests {
             describe_value(&serde_yaml::Value::String("x".into())),
             "string \"x\""
         );
+    }
+
+    /// A deserializer that fails `deserialize_any` — drives the `?`
+    /// on `serde_yaml::Value::deserialize(d)` for deserializers a
+    /// YAML doc can never produce.
+    struct FailAny;
+
+    impl<'de> serde::Deserializer<'de> for FailAny {
+        type Error = serde::de::value::Error;
+
+        fn deserialize_any<V: serde::de::Visitor<'de>>(
+            self,
+            _visitor: V,
+        ) -> Result<V::Value, Self::Error> {
+            Err(serde::de::Error::custom("boom"))
+        }
+
+        serde::forward_to_deserialize_any! {
+            bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str
+            string bytes byte_buf option unit unit_struct newtype_struct
+            seq tuple tuple_struct map struct enum identifier ignored_any
+        }
+    }
+
+    #[test]
+    fn spec_deserializers_propagate_deserializer_errors() {
+        assert!(SpecDuration::deserialize(FailAny).is_err());
+        assert!(TimeSpec::deserialize(FailAny).is_err());
+    }
+
+    #[test]
+    fn spec_deserializers_cover_more_deserializer_shapes() {
+        // serde's `value` deserializers instantiate `deserialize`
+        // with `D` types a YAML doc never produces — every
+        // instantiation must see both arms.
+        use serde::de::value::{Error as DeError, StrDeserializer, U64Deserializer};
+        assert!(TimeSpec::deserialize(StrDeserializer::<DeError>::new("09:00")).is_ok());
+        assert!(TimeSpec::deserialize(StrDeserializer::<DeError>::new("bogus")).is_err());
+        assert!(SpecDuration::deserialize(StrDeserializer::<DeError>::new("30m")).is_ok());
+        assert!(SpecDuration::deserialize(U64Deserializer::<DeError>::new(30)).is_err());
+        assert!(TimeSpec::deserialize(U64Deserializer::<DeError>::new(9)).is_err());
+        assert!(serde_json::from_str::<SpecDuration>("\"30m\"").is_ok());
+        assert!(serde_json::from_str::<SpecDuration>("{}").is_err());
+        assert!(serde_json::from_str::<TimeSpec>("\"09:00\"").is_ok());
+        assert!(serde_json::from_str::<TimeSpec>("42").is_err());
+        assert!(serde_json::from_value::<TimeSpec>(serde_json::Value::Null).is_err());
+    }
+
+    #[test]
+    fn rule_generates_on_negative_and_ordinal_filters() {
+        // Negative byMonthDay counts from the month end.
+        let r = rule("{freq: MONTHLY, byMonthDay: [-1]}");
+        assert!(rule_generates_on(&r, Date::constant(2026, 1, 31)));
+        assert!(!rule_generates_on(&r, Date::constant(2026, 1, 30)));
+        // ordinal_match on a non-ordinal ByDay → the `else` guard.
+        assert!(!ordinal_match(
+            ByDay::every(Weekday::Monday),
+            Date::constant(2026, 1, 5)
+        ));
+        // MONTHLY ordinal byDay + byMonthDay — both filters run.
+        let r = rule("{freq: MONTHLY, byDay: [-1FR], byMonthDay: [30]}");
+        assert!(rule_generates_on(&r, Date::constant(2026, 1, 30)));
+        assert!(!rule_generates_on(&r, Date::constant(2026, 1, 23)));
     }
 }

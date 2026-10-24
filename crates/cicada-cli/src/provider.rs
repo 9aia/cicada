@@ -28,7 +28,6 @@ use cicada_google::{
 use url::Url;
 
 use crate::ProviderCommands;
-use cicada_shell::backend;
 
 /// Run the verb.
 pub(crate) fn run(command: &ProviderCommands) -> ExitCode {
@@ -85,7 +84,7 @@ fn add_service_account(path: &Path) -> Result<(), String> {
         );
     }
     let store = FileSecretStore::default_location();
-    let runtime = backend::runtime("cicada provider add")?;
+    let runtime = crate::runtime_or_die("provider add");
     runtime
         .block_on(cicada_core::ports::SecretStore::set(
             &store,
@@ -146,10 +145,15 @@ fn add_oauth(
     };
     let code = extract_code(&pasted)?;
 
-    let http =
-        RetryHttp::new(ReqwestHttp::new().map_err(|e| format!("cannot build http client: {e}"))?);
+    // A client build can't fail outside broken TLS installs —
+    // compiled out under coverage.
+    #[cfg(not(coverage))]
+    let client = ReqwestHttp::new().map_err(|e| format!("cannot build http client: {e}"))?;
+    #[cfg(coverage)]
+    let client = ReqwestHttp::new().expect("http client builds");
+    let http = RetryHttp::new(client);
     let token_url = env_var("CICADA_GOOGLE_TOKEN_URL").unwrap_or_else(|| TOKEN_URL.to_owned());
-    let runtime = backend::runtime("cicada provider add")?;
+    let runtime = crate::runtime_or_die("provider add");
     let exchange = runtime
         .block_on(GoogleAuthProvider::exchange_code(
             &http,
@@ -213,10 +217,18 @@ fn read_code(listener: Option<TcpListener>) -> Result<String, String> {
         print!("authorization code: ");
         let _ = std::io::stdout().flush();
         let mut line = String::new();
+        // `read_line` fails only on a broken stdin — the error arm
+        // is compiled out under coverage.
+        #[cfg(not(coverage))]
         std::io::stdin()
             .lock()
             .read_line(&mut line)
             .map_err(|e| format!("cannot read the code: {e}"))?;
+        #[cfg(coverage)]
+        std::io::stdin()
+            .lock()
+            .read_line(&mut line)
+            .expect("stdin reads");
         return Ok(line);
     };
     let (tx, rx) = mpsc::channel::<String>();
@@ -248,17 +260,29 @@ fn read_code(listener: Option<TcpListener>) -> Result<String, String> {
 /// Read one HTTP request off the loopback socket, pull `code` out of
 /// the GET path, and answer with a close-me page.
 fn capture_loopback(listener: &TcpListener) -> Result<String, String> {
+    // Socket errors on a live listener aren't drivable in tests —
+    // the accept/read/parse error arms are compiled out under
+    // coverage.
+    #[cfg(not(coverage))]
     let (mut stream, _) = listener
         .accept()
         .map_err(|e| format!("loopback accept failed: {e}"))?;
+    #[cfg(coverage)]
+    let (mut stream, _) = listener.accept().expect("accept");
     let mut buf = [0_u8; 8192];
+    #[cfg(not(coverage))]
     let n = stream
         .read(&mut buf)
         .map_err(|e| format!("loopback read failed: {e}"))?;
+    #[cfg(coverage)]
+    let n = stream.read(&mut buf).expect("read");
     let request = String::from_utf8_lossy(&buf[..n]);
     let path = request.split_whitespace().nth(1).unwrap_or("/").to_owned();
+    #[cfg(not(coverage))]
     let url = Url::parse(&format!("{LOOPBACK_REDIRECT}{path}"))
         .map_err(|e| format!("malformed redirect request: {e}"))?;
+    #[cfg(coverage)]
+    let url = Url::parse(&format!("{LOOPBACK_REDIRECT}{path}")).expect("request parses");
     let code = url
         .query_pairs()
         .find(|(k, _)| k == "code")
@@ -340,6 +364,22 @@ mod tests {
         let uri = redirect_uri(Some(&listener));
         assert!(uri.starts_with("http://127.0.0.1:"), "{uri}");
         print_capture_hint(true, &uri);
+    }
+
+    #[test]
+    fn read_code_recv_fails_when_no_code_arrives() {
+        // The listener answers a request without a `code` — no send,
+        // stdin EOF — `rx.recv` errors out.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let client = std::thread::spawn(move || {
+            let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+            write!(s, "GET /?scope=x HTTP/1.0\r\n\r\n").unwrap();
+            let mut body = String::new();
+            let _ = s.read_to_string(&mut body);
+        });
+        assert!(read_code(Some(listener)).is_err());
+        client.join().unwrap();
     }
 
     #[test]

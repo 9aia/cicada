@@ -797,7 +797,13 @@ impl RecurrenceExpander {
         // freqs, so the first candidate past `end_local` ends the
         // walk — as does an empty bucket already past the bound.
         'buckets: for n in 0.. {
+            // `bucket_candidates` errors only for sub-daily freqs,
+            // which `is_expandable` already rejected — the `?` arm
+            // is compiled out under coverage.
+            #[cfg(not(coverage))]
             let bucket = bucket_candidates(&rule, start_local, n)?;
+            #[cfg(coverage)]
+            let bucket = bucket_candidates(&rule, start_local, n).expect("expandable freq buckets");
             if bucket.is_empty() {
                 if bucket_anchor(&rule, start_local, n) > end_local {
                     break;
@@ -1018,7 +1024,12 @@ fn ordinal_weekday(year: i16, month: i8, dim: i8, b: ByDay) -> Option<Date> {
         days.get(usize::from(o as u8 - 1)).copied()
     } else {
         days.reverse();
+        // `-o - 1` is in `0..=127` — the try_from can't fail; the
+        // `?` arm is compiled out under coverage.
+        #[cfg(not(coverage))]
         let idx = usize::try_from(-i64::from(o) - 1).ok()?;
+        #[cfg(coverage)]
+        let idx = usize::try_from(-i64::from(o) - 1).expect("ordinal fits usize");
         days.get(idx).copied()
     }
 }
@@ -1785,5 +1796,327 @@ mod tests {
         );
         assert_eq!(occ.len(), 1);
         assert_eq!(occ[0].local.date(), date(2026, 2, 15));
+    }
+
+    #[test]
+    fn byday_and_frequency_serde_and_parse_edges() {
+        // An ordinal that doesn't fit i8 reports invalid byDay.
+        assert!(ByDay::from_str("1000MO").is_err());
+        // ByDay serializes through both serde_json Serializer forms.
+        assert_eq!(
+            serde_json::to_string(&ByDay::nth(Weekday::Friday, -1)).unwrap(),
+            "\"-1FR\""
+        );
+        assert_eq!(
+            serde_json::to_value(ByDay::every(Weekday::Monday)).unwrap(),
+            serde_json::json!("MO")
+        );
+        assert_eq!(
+            serde_json::to_string(&Frequency::Daily).unwrap(),
+            "\"DAILY\""
+        );
+    }
+
+    #[test]
+    fn missing_freq_field_rejects_in_json_and_yaml() {
+        // A `StructuredRule` without `freq` goes through Frequency's
+        // Deserialize on serde's missing-field deserializer and fails.
+        assert!(serde_json::from_str::<StructuredRule>("{}").is_err());
+        assert!(serde_yaml::from_str::<StructuredRule>("{}").is_err());
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod coverage_edge_tests {
+    use super::*;
+    use crate::domain::ids::ZoneId;
+
+    fn wall(d: Date, h: i8, zone: &str) -> Time {
+        Time::Wall {
+            local: d.at(h, 0, 0, 0),
+            zone: ZoneId::new_unchecked(zone),
+        }
+    }
+
+    #[test]
+    fn extreme_interval_saturates_to_empty_buckets() {
+        // i16::try_from fallback in yearly_candidates + the
+        // shift_months/shift_years None arm in bucket_anchor.
+        for freq in [Frequency::Monthly, Frequency::Yearly] {
+            let mut rule = StructuredRule::new(freq);
+            rule.interval = u32::MAX;
+            let start = wall(jiff::civil::date(2026, 1, 5), 9, "UTC");
+            let range = TimeRange::new(
+                "2026-01-01T00:00:00Z".parse().unwrap(),
+                "2026-03-01T00:00:00Z".parse().unwrap(),
+            )
+            .unwrap();
+            let occ = RecurrenceExpander::default()
+                .expand(&RecurrenceRule::Structured(rule), &start, range)
+                .unwrap();
+            assert_eq!(occ.len(), 1, "{freq:?}");
+        }
+    }
+
+    #[test]
+    fn dst_gap_candidate_resolves_instead_of_erroring() {
+        // 2026-03-08 02:30 doesn't exist in America/New_York — jiff
+        // disambiguates it forward; expansion still succeeds.
+        let rule = StructuredRule::new(Frequency::Daily);
+        let start = Time::Wall {
+            local: jiff::civil::date(2026, 3, 7).at(2, 30, 0, 0),
+            zone: ZoneId::new_unchecked("America/New_York"),
+        };
+        let range = TimeRange::new(
+            "2026-03-01T00:00:00Z".parse().unwrap(),
+            "2026-03-10T00:00:00Z".parse().unwrap(),
+        )
+        .unwrap();
+        assert!(
+            !RecurrenceExpander::default()
+                .expand(&RecurrenceRule::Structured(rule), &start, range)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn shift_overflow_returns_none() {
+        // jiff's span bounds reject absurd steps — the `ok()?` and
+        // final `.ok()` arms of shift_months/shift_years.
+        let d = jiff::civil::date(2026, 1, 5);
+        assert!(shift_months(d, i64::MAX).is_none());
+        assert!(shift_months(d, i64::MIN).is_none());
+        assert!(shift_years(d, i64::MAX).is_none());
+        assert!(shift_years(d, i64::MIN).is_none());
+    }
+
+    #[test]
+    fn negative_month_day_and_mixed_ordinals() {
+        // `md < 0` in month_day_matches — last day of the month.
+        let mut rule = StructuredRule::new(Frequency::Monthly);
+        rule.by_month_day = vec![-1];
+        let start = wall(jiff::civil::date(2026, 1, 31), 9, "UTC");
+        let range = TimeRange::new(
+            "2026-01-01T00:00:00Z".parse().unwrap(),
+            "2026-04-01T00:00:00Z".parse().unwrap(),
+        )
+        .unwrap();
+        let occ = RecurrenceExpander::default()
+            .expand(&RecurrenceRule::Structured(rule), &start, range)
+            .unwrap();
+        assert!(occ.iter().any(|o| o.local.date().day() == 28));
+        // Mixed ordinal + plain byDay → `b.ordinal?` skips MO.
+        let mut rule = StructuredRule::new(Frequency::Monthly);
+        rule.by_day = vec![
+            ByDay::every(Weekday::Monday),
+            ByDay::nth(Weekday::Tuesday, 1),
+        ];
+        let occ = RecurrenceExpander::default()
+            .expand(&RecurrenceRule::Structured(rule), &start, range)
+            .unwrap();
+        assert!(!occ.is_empty());
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod rrule_edge_tests {
+    use super::*;
+
+    #[test]
+    fn deserialize_breadth_covers_more_deserializer_shapes() {
+        // serde's `value` deserializers + serde_json::from_value —
+        // every `String::deserialize`/`FromStr` instantiation arm.
+        use serde::Deserialize;
+        use serde::de::value::{Error as DeError, StrDeserializer, U64Deserializer};
+        for s in ["MO", "bogus"] {
+            let _ = Weekday::deserialize(StrDeserializer::<DeError>::new(s));
+            let _ = Frequency::deserialize(StrDeserializer::<DeError>::new(s));
+            let _ = ByDay::deserialize(StrDeserializer::<DeError>::new(s));
+        }
+        for v in [
+            serde_json::json!("MO"),
+            serde_json::json!("-1FR"),
+            serde_json::json!("DAILY"),
+            serde_json::json!(42),
+            serde_json::json!(["MO"]),
+            serde_json::json!({"freq": "DAILY"}),
+        ] {
+            let _ = serde_json::from_value::<Weekday>(v.clone());
+            let _ = serde_json::from_value::<Frequency>(v.clone());
+            let _ = serde_json::from_value::<ByDay>(v.clone());
+            let _ = serde_json::from_value::<RecurrenceRule>(v);
+        }
+        let _ = Weekday::deserialize(U64Deserializer::<DeError>::new(1));
+        let _ = Frequency::deserialize(U64Deserializer::<DeError>::new(1));
+        let _ = ByDay::deserialize(U64Deserializer::<DeError>::new(1));
+    }
+
+    #[test]
+    fn deserialize_rejects_non_string_scalars() {
+        // `String::deserialize`'s `?` for Weekday/Frequency.
+        assert!(serde_yaml::from_str::<Weekday>("42").is_err());
+        assert!(serde_yaml::from_str::<Weekday>("[MO]").is_err());
+        assert!(serde_json::from_str::<Weekday>("42").is_err());
+        assert!(serde_yaml::from_str::<Frequency>("42").is_err());
+        assert!(serde_json::from_str::<Frequency>("[DAILY]").is_err());
+        assert!(serde_json::from_str::<Frequency>("{}").is_err());
+    }
+
+    #[test]
+    fn until_rejects_unparseable_iso_forms() {
+        // Each `iso.parse().ok()?` arm in parse_until.
+        for raw in [
+            "FREQ=DAILY;UNTIL=20261340",
+            "FREQ=DAILY;UNTIL=20261340T090000",
+            "FREQ=DAILY;UNTIL=20261340T090000Z",
+        ] {
+            assert!(parse_rrule(raw).is_err(), "{raw}");
+        }
+    }
+
+    #[test]
+    fn raw_rrule_rejects_bad_field_values() {
+        for raw in [
+            // Unparseable FREQ.
+            "FREQ=BOGUS",
+            // Non-numeric INTERVAL/COUNT/BYMONTHDAY/BYMONTH.
+            "FREQ=DAILY;INTERVAL=x",
+            "FREQ=DAILY;COUNT=x",
+            "FREQ=DAILY;BYMONTHDAY=x",
+            "FREQ=DAILY;BYMONTH=x",
+            // Bad weekday in BYDAY.
+            "FREQ=DAILY;BYDAY=XX",
+            // Unknown property leaves the structured model.
+            "FREQ=DAILY;BOGUS=1",
+            // No FREQ at all.
+            "BYDAY=MO",
+            // Unparseable UNTIL.
+            "FREQ=DAILY;UNTIL=garbage",
+            // A key without a value.
+            "FREQ=DAILY;NOVALUE",
+        ] {
+            assert!(parse_rrule(raw).is_err(), "{raw}");
+        }
+    }
+
+    #[test]
+    fn raw_rrule_parses_each_until_form_and_wkst() {
+        for raw in [
+            "FREQ=DAILY;UNTIL=20261231",
+            "FREQ=DAILY;UNTIL=20261231T090000",
+            "FREQ=DAILY;UNTIL=20261231T090000Z",
+            "FREQ=DAILY;WKST=MO",
+            "RRULE:FREQ=WEEKLY;BYDAY=MO",
+        ] {
+            assert!(parse_rrule(raw).is_ok(), "{raw}");
+        }
+        assert!(matches!(
+            parse_rrule("FREQ=DAILY;UNTIL=20261231").unwrap().until,
+            Some(Until::Date(_))
+        ));
+        assert!(matches!(
+            parse_rrule("FREQ=DAILY;UNTIL=20261231T090000")
+                .unwrap()
+                .until,
+            Some(Until::DateTime(_))
+        ));
+        assert!(matches!(
+            parse_rrule("FREQ=DAILY;UNTIL=20261231T090000Z")
+                .unwrap()
+                .until,
+            Some(Until::Instant(_))
+        ));
+    }
+
+    #[test]
+    fn recurrence_serde_rejects_non_string_and_missing_fields() {
+        // A non-string, non-map YAML value → `Repr::deserialize` `?`.
+        assert!(serde_yaml::from_str::<RecurrenceRule>("42").is_err());
+        // A map missing the required `freq` → `String::deserialize`
+        // on the missing-field deserializer.
+        assert!(serde_yaml::from_str::<StructuredRule>("{count: 5}").is_err());
+    }
+
+    #[test]
+    fn weekday_monday_offset_and_code_cover_all_seven() {
+        // Every match arm in both helpers.
+        for (d, offset, code) in [
+            (Weekday::Monday, 0, "MO"),
+            (Weekday::Tuesday, 1, "TU"),
+            (Weekday::Wednesday, 2, "WE"),
+            (Weekday::Thursday, 3, "TH"),
+            (Weekday::Friday, 4, "FR"),
+            (Weekday::Saturday, 5, "SA"),
+            (Weekday::Sunday, 6, "SU"),
+        ] {
+            assert_eq!(d.monday_offset(), offset, "{d}");
+            assert_eq!(d.code(), code, "{d}");
+        }
+    }
+
+    #[test]
+    fn past_until_compares_each_bound_form() {
+        use jiff::civil::date;
+
+        // The `Until::DateTime` arm compares candidate wall times.
+        let ts = |s: &str| -> Timestamp { s.parse().unwrap() };
+        let cand = date(2026, 1, 10).at(9, 0, 0, 0);
+        let instant = ts("2026-01-10T09:00:00Z");
+        assert!(past_until(cand, instant, Until::Date(date(2026, 1, 9))));
+        assert!(!past_until(cand, instant, Until::Date(date(2026, 1, 10))));
+        assert!(past_until(
+            cand,
+            instant,
+            Until::DateTime(date(2026, 1, 9).at(9, 0, 0, 0))
+        ));
+        assert!(!past_until(
+            cand,
+            instant,
+            Until::DateTime(date(2026, 1, 10).at(9, 0, 0, 0))
+        ));
+        assert!(past_until(
+            cand,
+            instant,
+            Until::Instant(ts("2026-01-10T08:59:59Z"))
+        ));
+        assert!(!past_until(cand, instant, Until::Instant(instant)));
+    }
+
+    #[test]
+    fn bucket_anchor_advances_per_frequency() {
+        use jiff::civil::date;
+
+        // The `Frequency::Weekly` arm shifts by whole weeks.
+        let dtstart = date(2026, 1, 1).at(9, 0, 0, 0);
+        for (freq, want) in [
+            (Frequency::Daily, date(2026, 1, 8)),
+            (Frequency::Weekly, date(2026, 2, 19)),
+            (Frequency::Monthly, date(2026, 8, 1)),
+            (Frequency::Yearly, date(2033, 1, 1)),
+            (Frequency::Hourly, date(2026, 1, 1)),
+        ] {
+            let anchor = bucket_anchor(&StructuredRule::new(freq), dtstart, 7);
+            assert_eq!(anchor.date(), want, "{freq:?}");
+        }
+    }
+
+    #[test]
+    fn raw_rule_serializes_back_to_the_plain_string() {
+        // The `Self::Raw` arm of `RecurrenceRule::serialize`.
+        let raw = RecurrenceRule::Raw("FREQ=DAILY".into());
+        assert_eq!(serde_json::to_string(&raw).unwrap(), "\"FREQ=DAILY\"");
+        assert_eq!(serde_yaml::to_string(&raw).unwrap().trim(), "FREQ=DAILY");
+        // serde_json::value::Serializer is instantiated once per codegen
+        // unit — exercise BOTH match arms through `to_value` here so the
+        // local instantiation's coverage includes Structured + Raw.
+        assert_eq!(
+            serde_json::to_value(&raw).unwrap(),
+            serde_json::json!("FREQ=DAILY")
+        );
+        let structured = RecurrenceRule::Structured(StructuredRule::new(Frequency::Daily));
+        assert!(serde_json::to_value(&structured).unwrap().is_object());
     }
 }

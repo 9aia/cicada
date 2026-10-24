@@ -445,11 +445,13 @@ async fn partial_failure_preserves_state_and_continues() {
     assert_eq!(provider.events(&primary()).len(), 3);
 }
 
-/// A fake that fails `update_event`/`delete_event` for chosen remote
-/// ids — provider-side errors mid-apply (transient vs conflict).
+/// A fake that fails `update_event`/`delete_event`/`create_event`
+/// for chosen remote ids — provider-side errors mid-apply.
 struct FailingProvider {
     inner: FakeCalendarProvider,
     fail_updates_on: Vec<RemoteId>,
+    fail_deletes_on: Vec<RemoteId>,
+    fail_creates: bool,
 }
 
 impl FailingProvider {
@@ -457,6 +459,8 @@ impl FailingProvider {
         Self {
             inner,
             fail_updates_on,
+            fail_deletes_on: Vec::new(),
+            fail_creates: false,
         }
     }
 }
@@ -486,6 +490,9 @@ impl CalendarProvider for FailingProvider {
         id: &LocalId,
         o: &WriteOptions,
     ) -> Result<RemoteEvent> {
+        if self.fail_creates {
+            return Err(CicadaError::transient("provider 503 on create"));
+        }
         self.inner.create_event(c, e, id, o).await
     }
     async fn update_event(
@@ -501,6 +508,9 @@ impl CalendarProvider for FailingProvider {
         self.inner.update_event(c, id, e, o).await
     }
     async fn delete_event(&self, c: &CalendarRef, id: &RemoteId, o: &WriteOptions) -> Result<()> {
+        if self.fail_deletes_on.contains(id) {
+            return Err(CicadaError::transient("provider 503 on delete"));
+        }
         self.inner.delete_event(c, id, o).await
     }
     async fn free_busy(
@@ -693,4 +703,514 @@ async fn refresh_unknown_calendar_errors() {
         .await
         .unwrap_err();
     assert_eq!(err.kind(), cicada_core::ErrorKind::Fatal);
+}
+
+#[tokio::test]
+async fn refresh_resyncs_etag_only_drift() {
+    let provider = FakeCalendarProvider::new();
+    let store = MemoryStateStore::new();
+    let clock = clock();
+
+    let v1 = calendar(vec![Event::new("a", body("A"))]);
+    let p1 = plan(&v1, &provider, &store, &clock).await;
+    apply(&v1, &p1, &provider, &store, &clock, false, false).await;
+
+    let a_remote = store.snapshot().calendars["work"].events[&LocalId::new("a")]
+        .remote_id
+        .clone();
+    // An empty out-of-band edit bumps the etag without touching the
+    // managed body — cosmetic churn, not drift → the etag_resyncs
+    // write pass.
+    provider.simulate_remote_edit(&primary(), &a_remote, |_| {});
+    let report = RefreshState::new()
+        .run(&RefreshRequest {
+            calendar_name: "work",
+            provider: &provider,
+            remote_calendar: &primary(),
+            state: &store,
+            clock: &clock,
+        })
+        .await
+        .unwrap();
+    assert!(report.reconciled.is_empty());
+    assert!(report.updated.is_empty());
+    assert!(report.removed.is_empty());
+    assert_eq!(report.unchanged, 1);
+    // The recorded etag tracks live so drift stays authoritative.
+    let live = provider
+        .get_event(&primary(), &a_remote)
+        .await
+        .unwrap()
+        .unwrap();
+    let a = &store.snapshot().calendars["work"].events[&LocalId::new("a")];
+    assert_eq!(a.etag, live.etag);
+}
+
+/// A store whose load/save/journal paths fail on demand — drives
+/// the `?` propagation arms in ApplyPlan/RefreshState.
+struct ErrStore {
+    inner: MemoryStateStore,
+    fail_load: bool,
+    fail_save: bool,
+    fail_journal: bool,
+}
+
+#[async_trait::async_trait]
+impl StateStore for ErrStore {
+    async fn load(&self) -> Result<cicada_core::domain::state::RecordedState> {
+        if self.fail_load {
+            return Err(CicadaError::fatal("store load exploded"));
+        }
+        self.inner.load().await
+    }
+    async fn save(&self, s: &cicada_core::domain::state::RecordedState) -> Result<()> {
+        if self.fail_save {
+            return Err(CicadaError::fatal("store save exploded"));
+        }
+        self.inner.save(s).await
+    }
+    async fn append_journal(&self, e: &cicada_core::domain::state::JournalEntry) -> Result<()> {
+        if self.fail_journal {
+            return Err(CicadaError::fatal("store journal exploded"));
+        }
+        self.inner.append_journal(e).await
+    }
+    async fn journal(&self) -> Result<Vec<cicada_core::domain::state::JournalEntry>> {
+        self.inner.journal().await
+    }
+}
+
+/// A provider whose `find_by_tag` always errors — the adoption
+/// lookup `?` arms.
+struct FindFailProvider(FakeCalendarProvider);
+
+#[async_trait::async_trait]
+impl CalendarProvider for FindFailProvider {
+    fn capabilities(&self) -> cicada_core::domain::capabilities::ProviderCapabilities {
+        self.0.capabilities()
+    }
+    async fn list_events(
+        &self,
+        c: &CalendarRef,
+        r: Option<cicada_core::domain::time::TimeRange>,
+    ) -> Result<Vec<RemoteEvent>> {
+        self.0.list_events(c, r).await
+    }
+    async fn get_event(&self, c: &CalendarRef, i: &RemoteId) -> Result<Option<RemoteEvent>> {
+        self.0.get_event(c, i).await
+    }
+    async fn find_by_tag(&self, _c: &CalendarRef, _i: &LocalId) -> Result<Option<RemoteEvent>> {
+        Err(CicadaError::transient("tag lookup exploded"))
+    }
+    async fn create_event(
+        &self,
+        _c: &CalendarRef,
+        _e: &EventBody,
+        _i: &LocalId,
+        _o: &WriteOptions,
+    ) -> Result<RemoteEvent> {
+        Err(CicadaError::conflict("create says conflict"))
+    }
+    async fn update_event(
+        &self,
+        c: &CalendarRef,
+        i: &RemoteId,
+        e: &EventBody,
+        o: &WriteOptions,
+    ) -> Result<RemoteEvent> {
+        self.0.update_event(c, i, e, o).await
+    }
+    async fn delete_event(&self, c: &CalendarRef, i: &RemoteId, o: &WriteOptions) -> Result<()> {
+        self.0.delete_event(c, i, o).await
+    }
+    async fn free_busy(
+        &self,
+        c: &CalendarRef,
+        r: cicada_core::domain::time::TimeRange,
+    ) -> Result<Vec<cicada_core::domain::time::TimeRange>> {
+        self.0.free_busy(c, r).await
+    }
+}
+
+#[tokio::test]
+async fn apply_propagates_store_and_lookup_failures() {
+    let provider = FakeCalendarProvider::new();
+    let clock = clock();
+    let v1 = calendar(vec![Event::new("a", body("A"))]);
+
+    // store.load() fails → run() returns before planning any op.
+    let store = ErrStore {
+        inner: MemoryStateStore::new(),
+        fail_load: true,
+        fail_save: false,
+        fail_journal: false,
+    };
+    let p1 = plan(&v1, &provider, &store.inner, &clock).await;
+    let err = ApplyPlan::new()
+        .run(&cicada_core::application::ApplyRequest {
+            plan: &p1,
+            desired: &v1,
+            provider: &provider,
+            state: &store,
+            remote_calendar: &primary(),
+            provider_name: "fake",
+            send_updates: SendUpdates::default(),
+            force: false,
+            resume: false,
+            clock: &clock,
+        })
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("load exploded"), "{err}");
+
+    // save fails at the end → the final `?` arm.
+    let store = ErrStore {
+        inner: MemoryStateStore::new(),
+        fail_load: false,
+        fail_save: true,
+        fail_journal: false,
+    };
+    let err = ApplyPlan::new()
+        .run(&cicada_core::application::ApplyRequest {
+            plan: &p1,
+            desired: &v1,
+            provider: &provider,
+            state: &store,
+            remote_calendar: &primary(),
+            provider_name: "fake",
+            send_updates: SendUpdates::default(),
+            force: false,
+            resume: false,
+            clock: &clock,
+        })
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("save exploded"), "{err}");
+
+    // find_by_tag fails during a resume-style adoption lookup.
+    let failing = FindFailProvider(provider);
+    // find_by_tag errors are journaled as a per-op failure, not a
+    // run error.
+    let r = ApplyPlan::new()
+        .run(&cicada_core::application::ApplyRequest {
+            plan: &p1,
+            desired: &v1,
+            provider: &failing,
+            state: &store.inner,
+            remote_calendar: &primary(),
+            provider_name: "fake",
+            send_updates: SendUpdates::default(),
+            force: false,
+            resume: true,
+            clock: &clock,
+        })
+        .await
+        .unwrap();
+    assert_eq!(r.failed(), 1);
+    assert!(format!("{:?}", r.outcomes[0].result).contains("tag lookup exploded"));
+}
+
+#[tokio::test]
+async fn conflict_journal_save_failure_is_fatal() {
+    // Conflicted op + a save that explodes — the conflict-gate's
+    // push_journal `?` propagates the store error out of run().
+    let provider = FakeCalendarProvider::new();
+    let inner = MemoryStateStore::new();
+    let clock = clock();
+
+    let v1 = calendar(vec![Event::new("a", body("A"))]);
+    let p1 = plan(&v1, &provider, &inner, &clock).await;
+    apply(&v1, &p1, &provider, &inner, &clock, false, false).await;
+    let remote_id = inner.snapshot().calendars["work"].events[&LocalId::new("a")]
+        .remote_id
+        .clone();
+    provider.simulate_remote_edit(&primary(), &remote_id, |b| {
+        b.summary = "UI edit".into();
+    });
+    let p2 = plan(&v1, &provider, &inner, &clock).await;
+    let store = ErrStore {
+        inner,
+        fail_load: false,
+        fail_save: true,
+        fail_journal: false,
+    };
+    let err = ApplyPlan::new()
+        .run(&ApplyRequest {
+            plan: &p2,
+            desired: &v1,
+            provider: &provider,
+            state: &store,
+            remote_calendar: &primary(),
+            provider_name: "fake",
+            send_updates: SendUpdates::default(),
+            force: false,
+            resume: false,
+            clock: &clock,
+        })
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("save exploded"), "{err}");
+}
+
+#[tokio::test]
+async fn execute_write_failures_are_journaled_per_op() {
+    // Every `?` inside execute()'s provider calls: Delete's
+    // delete_event, Replace's delete/create, forced-NoOp's update —
+    // each lands as a per-op Failed, not a run error.
+    let provider = FakeCalendarProvider::new();
+    let store = MemoryStateStore::new();
+    let clock = clock();
+
+    let mut standup = body("Standup");
+    standup.recurrence = Some(rule(Frequency::Weekly));
+    let mut retro = body("Retro");
+    retro.recurrence = Some(rule(Frequency::Weekly));
+    let v1 = calendar(vec![
+        Event::new("a", body("A")),
+        Event::new("gone", body("Gone")),
+        Event::new("standup", standup),
+        Event::new("retro", retro),
+    ]);
+    let p1 = plan(&v1, &provider, &store, &clock).await;
+    apply(&v1, &p1, &provider, &store, &clock, false, false).await;
+
+    let snap = store.snapshot();
+    let remote_of = |id: &str| {
+        snap.calendars["work"].events[&LocalId::new(id)]
+            .remote_id
+            .clone()
+    };
+    let (a_remote, gone_remote, standup_remote) =
+        (remote_of("a"), remote_of("gone"), remote_of("standup"));
+
+    // Drift `a` so its NoOp conflicts (rewritten under --force);
+    // v2 drops `gone` and recurs standup/retro differently.
+    provider.simulate_remote_edit(&primary(), &a_remote, |b| {
+        b.summary = "UI edit".into();
+    });
+    let mut standup2 = body("Standup");
+    standup2.recurrence = Some(rule(Frequency::Daily));
+    let mut retro2 = body("Retro");
+    retro2.recurrence = Some(rule(Frequency::Daily));
+    let v2 = calendar(vec![
+        Event::new("a", body("A")),
+        Event::new("standup", standup2),
+        Event::new("retro", retro2),
+    ]);
+
+    let mut failing = FailingProvider::new(provider, vec![a_remote]);
+    failing.fail_deletes_on = vec![gone_remote, standup_remote];
+    failing.fail_creates = true;
+
+    let p2 = plan(&v2, &failing, &store, &clock).await;
+    let r = apply(&v2, &p2, &failing, &store, &clock, true, false).await;
+    // Delete(gone) → delete `?`; Replace(standup) → find_by_tag ok,
+    // delete `?`; Replace(retro) → delete ok, create `?`;
+    // NoOp(a, forced) → update `?`.
+    assert_eq!(r.failed(), 4, "{:?}", r.outcomes);
+    let journal = store.journal().await.unwrap();
+    assert!(
+        journal
+            .iter()
+            .skip(4)
+            .all(|e| matches!(e.outcome, JournalOutcome::Failed { .. }))
+    );
+}
+
+#[tokio::test]
+async fn replace_adopts_remote_already_carrying_desired_hash() {
+    // The remote already carries the desired hash (e.g. a prior
+    // half-finished apply created it out of band) — execute()
+    // adopts it via find_by_tag instead of delete+create.
+    let provider = FakeCalendarProvider::new();
+    let store = MemoryStateStore::new();
+    let clock = clock();
+
+    let mut standup = body("Standup");
+    standup.recurrence = Some(rule(Frequency::Weekly));
+    let mut other = body("Other");
+    other.recurrence = Some(rule(Frequency::Weekly));
+    let v1 = calendar(vec![
+        Event::new("standup", standup),
+        Event::new("other", other),
+    ]);
+    let p1 = plan(&v1, &provider, &store, &clock).await;
+    apply(&v1, &p1, &provider, &store, &clock, false, false).await;
+
+    let mut standup2 = body("Standup");
+    standup2.recurrence = Some(rule(Frequency::Daily));
+    let v2 = calendar(vec![
+        Event::new("standup", standup2.clone()),
+        Event::new("other", standup2.clone()),
+    ]);
+    let p2 = plan(&v2, &provider, &store, &clock).await;
+    assert!(p2.ops.iter().any(|op| op.kind() == OpKind::Replace));
+
+    // Out-of-band managed remote already carrying the desired (v2)
+    // hash — seed_managed writes `cicada:state` so `landed` is true.
+    provider.seed_managed(&primary(), &LocalId::new("standup"), standup2.clone());
+    // …and BOTH recorded remotes are gone: find_by_tag resolves the
+    // seeded event for standup (the landed arm), while "other" gets
+    // the `if let` else arm — remote is None → straight to
+    // delete+create. Deleting a live remote marks the op conflicted,
+    // so this needs --force to execute.
+    for local in ["standup", "other"] {
+        let remote_id = store.snapshot().calendars["work"].events[&LocalId::new(local)]
+            .remote_id
+            .clone();
+        provider.simulate_remote_delete(&primary(), &remote_id);
+    }
+    let r = apply(&v2, &p2, &provider, &store, &clock, true, false).await;
+    assert!(
+        r.outcomes
+            .iter()
+            .any(|o| matches!(o.result, OpResult::AlreadyApplied { .. })),
+        "{:?}",
+        r.outcomes
+    );
+    assert!(
+        r.outcomes
+            .iter()
+            .any(|o| matches!(o.result, OpResult::Applied { .. })),
+        "{:?}",
+        r.outcomes
+    );
+}
+
+#[tokio::test]
+async fn journal_save_failure_during_failed_op_is_fatal() {
+    // execute() errs (provider write fails) AND the subsequent
+    // push_journal save fails → the `?` arm inside the Err branch.
+    let provider = FakeCalendarProvider::new();
+    let store = ErrStore {
+        inner: MemoryStateStore::new(),
+        fail_load: false,
+        fail_save: true,
+        fail_journal: false,
+    };
+    let clock = clock();
+
+    let v1 = calendar(vec![Event::new("a", body("A"))]);
+    let p1 = plan(&v1, &provider, &store.inner, &clock).await;
+    let mut failing = FailingProvider::new(provider, vec![]);
+    failing.fail_creates = true;
+    let err = ApplyPlan::new()
+        .run(&ApplyRequest {
+            plan: &p1,
+            desired: &v1,
+            provider: &failing,
+            state: &store,
+            remote_calendar: &primary(),
+            provider_name: "fake",
+            send_updates: SendUpdates::default(),
+            force: false,
+            resume: false,
+            clock: &clock,
+        })
+        .await
+        .unwrap_err();
+    assert!(!err.to_string().is_empty());
+}
+
+#[tokio::test]
+async fn create_write_failure_is_journaled_per_op() {
+    // The Create arm's `create_event` `?` — a provider write error is
+    // journaled as a per-op Failed, not a run error.
+    let provider = FakeCalendarProvider::new();
+    let store = MemoryStateStore::new();
+    let clock = clock();
+
+    let v1 = calendar(vec![Event::new("a", body("A"))]);
+    let p1 = plan(&v1, &provider, &store, &clock).await;
+    let mut failing = FailingProvider::new(provider, vec![]);
+    failing.fail_creates = true;
+    let r = apply(&v1, &p1, &failing, &store, &clock, false, false).await;
+    assert_eq!(r.failed(), 1, "{:?}", r.outcomes);
+}
+
+#[tokio::test]
+async fn forced_noop_on_undeclared_event_is_fatal() {
+    // --force rewrites a drifted NoOp with the desired body — when
+    // the op's local_id isn't in the desired map at all, the lookup
+    // failure propagates out of run().
+    let provider = FakeCalendarProvider::new();
+    let store = MemoryStateStore::new();
+    let clock = clock();
+
+    let v1 = calendar(vec![Event::new("a", body("A"))]);
+    let p1 = plan(&v1, &provider, &store, &clock).await;
+    apply(&v1, &p1, &provider, &store, &clock, false, false).await;
+    let remote_id = store.snapshot().calendars["work"].events[&LocalId::new("a")]
+        .remote_id
+        .clone();
+    provider.simulate_remote_edit(&primary(), &remote_id, |b| {
+        b.summary = "UI edit".into();
+    });
+    // Same desired → drifted NoOp for `a`.
+    let p2 = plan(&v1, &provider, &store, &clock).await;
+    assert!(p2.ops.iter().all(|op| op.conflict().is_some()));
+
+    // Apply --force with a desired map that lacks `a` entirely — the
+    // lookup error journals as a per-op failure, not a run error.
+    let empty = calendar(vec![]);
+    let r = ApplyPlan::new()
+        .run(&ApplyRequest {
+            plan: &p2,
+            desired: &empty,
+            provider: &provider,
+            state: &store,
+            remote_calendar: &primary(),
+            provider_name: "fake",
+            send_updates: SendUpdates::default(),
+            force: true,
+            resume: false,
+            clock: &clock,
+        })
+        .await
+        .unwrap();
+    assert_eq!(r.failed(), 1, "{:?}", r.outcomes);
+    assert!(
+        format!("{:?}", r.outcomes[0].result).contains("forced NoOp rewrite"),
+        "{:?}",
+        r.outcomes[0].result
+    );
+}
+
+#[tokio::test]
+async fn resume_scans_prior_journal_for_applied_keys() {
+    // resume=true with a non-empty journal — the applied_keys
+    // filter closure runs.
+    let provider = FakeCalendarProvider::new();
+    let store = MemoryStateStore::new();
+    let clock = clock();
+
+    let v1 = calendar(vec![Event::new("a", body("A"))]);
+    let p1 = plan(&v1, &provider, &store, &clock).await;
+    apply(&v1, &p1, &provider, &store, &clock, false, false).await;
+    let r = apply(&v1, &p1, &provider, &store, &clock, false, true).await;
+    assert_eq!(r.skipped(), 1, "{:?}", r.outcomes);
+}
+
+#[tokio::test]
+async fn replace_tag_lookup_failure_is_journaled() {
+    // find_by_tag `?` inside execute()'s Replace arm.
+    let provider = FakeCalendarProvider::new();
+    let store = MemoryStateStore::new();
+    let clock = clock();
+
+    let mut standup = body("Standup");
+    standup.recurrence = Some(rule(Frequency::Weekly));
+    let v1 = calendar(vec![Event::new("standup", standup)]);
+    let p1 = plan(&v1, &provider, &store, &clock).await;
+    apply(&v1, &p1, &provider, &store, &clock, false, false).await;
+
+    let mut standup2 = body("Standup");
+    standup2.recurrence = Some(rule(Frequency::Daily));
+    let v2 = calendar(vec![Event::new("standup", standup2)]);
+    let failing = FindFailProvider(provider);
+    let p2 = plan(&v2, &failing, &store, &clock).await;
+    assert!(p2.ops.iter().any(|op| op.kind() == OpKind::Replace));
+    let r = apply(&v2, &p2, &failing, &store, &clock, false, false).await;
+    assert_eq!(r.failed(), 1);
+    assert!(format!("{:?}", r.outcomes[0].result).contains("tag lookup exploded"));
 }

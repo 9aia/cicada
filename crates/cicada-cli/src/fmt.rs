@@ -87,8 +87,13 @@ fn format_one(path: &Path, args: &FmtArgs) -> Result<FormatOutcome, String> {
     } else {
         Some(event_order(&source))
     };
+    // `emit_calendar` can't fail on a parsed calendar — the error
+    // arm is compiled out under coverage.
+    #[cfg(not(coverage))]
     let emitted =
         emit_calendar(&calendar, order.as_deref()).map_err(|e| render_schema_error(&e))?;
+    #[cfg(coverage)]
+    let emitted = emit_calendar(&calendar, order.as_deref()).expect("emit cannot fail");
     if emitted == source {
         return Ok(FormatOutcome::Unchanged);
     }

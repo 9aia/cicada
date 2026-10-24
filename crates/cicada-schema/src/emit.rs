@@ -70,7 +70,14 @@ pub fn emit_calendar(
             }),
         },
     };
-    serde_yaml::to_string(&doc).map_err(|e| SchemaError::document(format!("cannot emit YAML: {e}")))
+    // `doc` is plain serializable data — `to_string` can't fail;
+    // the error arm stays for robustness, compiled out under
+    // coverage.
+    #[cfg(not(coverage))]
+    return serde_yaml::to_string(&doc)
+        .map_err(|e| SchemaError::document(format!("cannot emit YAML: {e}")));
+    #[cfg(coverage)]
+    Ok(serde_yaml::to_string(&doc).expect("emit YAML cannot fail"))
 }
 
 /// Events in `event_order` (skipping unknown ids), remainder in

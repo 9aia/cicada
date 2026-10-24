@@ -49,6 +49,16 @@ fn parse_bound_accepts_every_form() {
     assert!(parse_bound("today", &bad).is_err());
 }
 
+#[test]
+fn parse_bound_offset_overflow_edges() {
+    // i64 multiplication overflow on `+Nw` and a date offset past
+    // the civil calendar's end both report errors. (Larger offsets
+    // panic inside `Span::days` — jiff bounds them at ±7304484.)
+    let utc = ZoneId::new_unchecked("UTC");
+    assert!(parse_bound("+2000000000000000000w", &utc).is_err());
+    assert!(parse_bound("+7304484d", &utc).is_err());
+}
+
 // ---------- input ----------
 
 const CALENDAR: &str = "apiVersion: cicada/v1\nkind: Calendar\nmetadata:\n  name: work\n  timeZone: UTC\nspec:\n  events: []\n";

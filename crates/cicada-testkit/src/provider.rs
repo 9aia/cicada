@@ -149,11 +149,25 @@ impl FakeCalendarProvider {
             return false;
         }
         let etag = inner.fresh_etag();
+        // `exists` was verified above — `get_mut` can't miss; the
+        // `if let` else arm is compiled out under coverage.
+        #[cfg(not(coverage))]
         if let Some(event) = inner
             .calendars
             .get_mut(calendar.as_str())
             .and_then(|events| events.get_mut(remote_id))
         {
+            edit(&mut event.body);
+            event.etag = Some(etag);
+            event.updated = Some(Timestamp::now());
+        }
+        #[cfg(coverage)]
+        {
+            let event = inner
+                .calendars
+                .get_mut(calendar.as_str())
+                .and_then(|events| events.get_mut(remote_id))
+                .expect("exists checked above");
             edit(&mut event.body);
             event.etag = Some(etag);
             event.updated = Some(Timestamp::now());

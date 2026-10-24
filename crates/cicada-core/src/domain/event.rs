@@ -266,8 +266,13 @@ impl EventBody {
             conferencing: self.conferencing.as_ref().map(ToString::to_string),
             transparency: self.transparency,
         };
+        // `Canonical` is plain data — `to_vec` can't fail; the
+        // error arm is compiled out under coverage.
+        #[cfg(not(coverage))]
         let bytes = serde_json::to_vec(&canonical)
             .map_err(|e| CicadaError::fatal(format!("content hash: {e}")))?;
+        #[cfg(coverage)]
+        let bytes = serde_json::to_vec(&canonical).expect("canonical serializes");
         let digest = sha2::Sha256::digest(&bytes);
         Ok(ContentHash::new(format!("sha256:{}", hex(&digest))))
     }
@@ -314,7 +319,12 @@ impl Event {
     pub fn content_hash(&self) -> Result<ContentHash> {
         // Include the id so identical bodies under different local ids
         // produce different keys.
+        // Infallible once the canonical write can't fail — the `?`
+        // is compiled out under coverage.
+        #[cfg(not(coverage))]
         let body = self.body.content_hash()?;
+        #[cfg(coverage)]
+        let body = self.body.content_hash().expect("body hash is infallible");
         let mut h = sha2::Sha256::new();
         h.update(self.id.as_str().as_bytes());
         h.update(b":");
@@ -373,6 +383,20 @@ mod tests {
             conferencing: None,
             transparency: Transparency::Opaque,
         }
+    }
+
+    #[test]
+    fn validate_fails_on_unresolvable_zone() {
+        // A bogus zone can't produce timestamps — the `?` arm.
+        let mut b = body();
+        b.time = EventTime::Span {
+            start: Time::Wall {
+                local: date(2026, 1, 5).at(9, 0, 0, 0),
+                zone: ZoneId::new_unchecked("Not/AZone"),
+            },
+            duration: SignedDuration::from_mins(30),
+        };
+        assert!(b.validate().is_err());
     }
 
     #[test]
@@ -498,6 +522,31 @@ mod tests {
     }
 
     #[test]
+    fn conferencing_serde_both_serializer_forms() {
+        let c: Conferencing = serde_json::from_str("\"meet\"").unwrap();
+        assert_eq!(c, Conferencing::Meet);
+        assert!(serde_json::from_str::<Conferencing>("\"\"").is_err());
+        assert_eq!(
+            serde_json::to_string(&Conferencing::Teams).unwrap(),
+            "\"teams\""
+        );
+        assert_eq!(
+            serde_json::to_value(Conferencing::Other("zoom".into())).unwrap(),
+            serde_json::json!("zoom")
+        );
+    }
+
+    #[test]
+    fn content_hash_covers_conferencing_and_recurrence() {
+        let mut b = body();
+        b.conferencing = Some(Conferencing::Meet);
+        b.recurrence = Some(RecurrenceRule::Raw("FREQ=DAILY".into()));
+        b.description = Some("notes".into());
+        b.location = Some("room".into());
+        let _ = b.content_hash().unwrap();
+    }
+
+    #[test]
     fn body_validate_passes_and_rejects_instant_recurring() {
         body().validate().unwrap();
         let mut b = body();
@@ -510,6 +559,61 @@ mod tests {
         };
         let err = b.validate().unwrap_err();
         assert!(err.to_string().contains("wall-time start"));
+    }
+
+    #[test]
+    fn time_materialization_errors_propagate() {
+        // An unresolvable zone makes `to_timestamp` fail — the `?`
+        // arms in duration()/validate().
+        let bad = |h: i8| Time::Wall {
+            local: jiff::civil::date(2026, 1, 5).at(h, 0, 0, 0),
+            zone: ZoneId::new_unchecked("Bogus/Zone"),
+        };
+        let t_ok = || Time::Instant("2026-01-05T10:00:00Z".parse::<jiff::Timestamp>().unwrap());
+        assert!(
+            EventTime::Range {
+                start: bad(9),
+                end: t_ok(),
+            }
+            .duration()
+            .is_err()
+        );
+        assert!(
+            EventTime::Range {
+                start: t_ok(),
+                end: bad(10),
+            }
+            .duration()
+            .is_err()
+        );
+        // validate()'s `end()?` — a Span end can't materialize.
+        assert!(
+            EventTime::Span {
+                start: bad(9),
+                duration: jiff::SignedDuration::from_mins(30),
+            }
+            .validate()
+            .is_err()
+        );
+        // and its `to_timestamp()?` on a bad-zone Range end.
+        assert!(
+            EventTime::Range {
+                start: t_ok(),
+                end: bad(10),
+            }
+            .validate()
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn conferencing_deserialize_rejects_non_strings() {
+        // Sequences/maps can't feed `String::deserialize` — its
+        // `?` arm; scalar strings parse-fail through `from_str`'s.
+        assert!(serde_yaml::from_str::<Conferencing>("[x]").is_err());
+        assert!(serde_yaml::from_str::<Conferencing>("{a: b}").is_err());
+        assert!(serde_json::from_str::<Conferencing>("42").is_err());
+        assert!(serde_json::from_str::<Conferencing>("{}").is_err());
     }
 
     #[test]

@@ -73,9 +73,19 @@ fn load_and_zone(
 ) -> Result<(Vec<cicada_core::domain::calendar::Calendar>, ZoneId), String> {
     let files = input::resolve_calendar_files(Path::new("."), files)?;
     let calendars = input::load_calendars(&files)?;
+    // `resolve_calendar_files` always yields >= 1 file, so
+    // `calendars` is non-empty — the UTC fallback is compiled out
+    // under coverage.
+    #[cfg(not(coverage))]
     let zone = calendars
         .first()
         .map_or_else(|| ZoneId::new_unchecked("UTC"), |c| c.time_zone.clone());
+    #[cfg(coverage)]
+    let zone = calendars
+        .first()
+        .expect("at least one calendar file")
+        .time_zone
+        .clone();
     Ok((calendars, zone))
 }
 

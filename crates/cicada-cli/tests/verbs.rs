@@ -848,3 +848,84 @@ fn provider_add_oauth_no_refresh_token_errors() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("no refresh token"));
 }
+
+#[test]
+fn show_range_window_and_parse_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path(), RICH_CALENDAR);
+    // Declared-view show — find_map + detail print arms.
+    let out = cicada(dir.path(), &["show", "standup"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // A backwards window fails TimeRange::new.
+    let out = cicada(
+        dir.path(),
+        &["show", "standup", "--from", "+30d", "--to", "today"],
+    );
+    assert!(!out.status.success());
+}
+
+#[test]
+fn init_and_fmt_and_validate_error_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    // init into an unwritable directory — scaffold's
+    // create_dir_all error arm.
+    let ro = dir.path().join("ro");
+    fs::create_dir_all(&ro).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&ro, fs::Permissions::from_mode(0o555)).unwrap();
+    }
+    let out = cicada(dir.path(), &["init", "--dir", ro.to_str().unwrap()]);
+    assert!(!out.status.success());
+
+    fixture(dir.path(), RICH_CALENDAR);
+    // fmt/validate on an unparseable file — the render_schema_error
+    // arms.
+    fs::write(dir.path().join("calendars/bad.yaml"), "kind: [").unwrap();
+    let out = cicada(dir.path(), &["fmt", "calendars/bad.yaml"]);
+    assert!(!out.status.success());
+    let out = cicada(dir.path(), &["validate", "calendars/bad.yaml"]);
+    assert!(!out.status.success());
+}
+
+#[test]
+fn fmt_and_init_write_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path(), RICH_CALENDAR);
+    // A read-only calendar file — fmt's fs::write error arm.
+    let f = dir.path().join("calendars/work.yaml");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&f, fs::Permissions::from_mode(0o444)).unwrap();
+    }
+    let out = cicada(dir.path(), &["fmt"]);
+    assert!(!out.status.success());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&f, fs::Permissions::from_mode(0o644)).unwrap();
+    }
+
+    // init where the manifest's parent is unwritable — the
+    // fs::write arm (the dir itself exists, so create_dir_all
+    // succeeds).
+    let ro = dir.path().join("ro");
+    fs::create_dir_all(&ro).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&ro, fs::Permissions::from_mode(0o555)).unwrap();
+    }
+    let out = cicada(dir.path(), &["init", "--dir", ro.to_str().unwrap()]);
+    assert!(!out.status.success());
+    // `--dir` under the unwritable parent — the create_dir_all arm.
+    let nested = ro.join("nested");
+    let out = cicada(dir.path(), &["init", "--dir", nested.to_str().unwrap()]);
+    assert!(!out.status.success());
+}

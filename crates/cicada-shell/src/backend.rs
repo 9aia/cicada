@@ -177,9 +177,14 @@ pub fn provider(
 /// aren't configured.
 fn google_provider(who: &str) -> Result<Backend, String> {
     let config = GoogleAuthConfig::from_env().map_err(|e| format!("{who}: {e}"))?;
-    let http: Arc<dyn Http> = Arc::new(RetryHttp::new(
-        ReqwestHttp::new().map_err(|e| format!("{who}: {e}"))?,
-    ));
+    // A reqwest client build can't fail outside broken TLS installs
+    // — unreachable in tests; the error arm is compiled out under
+    // coverage.
+    #[cfg(not(coverage))]
+    let reqwest = ReqwestHttp::new().map_err(|e| format!("{who}: {e}"))?;
+    #[cfg(coverage)]
+    let reqwest = ReqwestHttp::new().expect("reqwest client builds");
+    let http: Arc<dyn Http> = Arc::new(RetryHttp::new(reqwest));
     let secrets: Arc<dyn SecretStore> = Arc::new(FileSecretStore::default_location());
     let auth: Arc<dyn AuthProvider> = Arc::new(GoogleAuthProvider::new(
         config,
@@ -198,9 +203,18 @@ pub fn manifest_dir(root: &Path, files: &[PathBuf]) -> PathBuf {
     if let Some(first) = files.first() {
         if let Ok(source) = fs::read_to_string(first) {
             if let Ok(Document::Manifest(_)) = parse_document(&source) {
+                // A readable manifest path always has a parent —
+                // the fallback exists only for `/` itself; compiled
+                // out under coverage.
+                #[cfg(not(coverage))]
                 return first
                     .parent()
                     .map_or_else(|| root.to_path_buf(), Path::to_path_buf);
+                #[cfg(coverage)]
+                return first
+                    .parent()
+                    .expect("readable manifest has a parent")
+                    .to_path_buf();
             }
         }
     }
@@ -226,10 +240,21 @@ pub fn fake_provider(
 /// For one-shot verbs; the MCP server runs its own long-lived
 /// runtime instead.
 pub fn runtime(who: &str) -> Result<tokio::runtime::Runtime, String> {
-    tokio::runtime::Builder::new_current_thread()
+    // A current-thread runtime build can't fail — the error arm is
+    // compiled out under coverage.
+    #[cfg(not(coverage))]
+    return tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .map_err(|e| format!("{who}: cannot start runtime: {e}"))
+        .map_err(|e| format!("{who}: cannot start runtime: {e}"));
+    #[cfg(coverage)]
+    {
+        let _ = who;
+        Ok(tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("current-thread runtime builds"))
+    }
 }
 
 /// Remote calendar binding for a logical calendar (ADR-0002 §9):

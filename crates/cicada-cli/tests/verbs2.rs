@@ -814,6 +814,210 @@ fn init_skips_existing_gitignore() {
     );
 }
 
+// ---------- init/provider failure surfaces ----------
+
+#[test]
+fn init_reports_write_failures() {
+    let dir = tempfile::tempdir().unwrap();
+    // `calendars/work.yaml` exists as a directory — the scaffold's
+    // `fs::write` can't land on it (the create_dir_all arm stays
+    // fine, the write arm fails).
+    fs::create_dir_all(dir.path().join("calendars/work.yaml")).unwrap();
+    let out = cicada(dir.path(), &["init", "--force"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("cannot write"));
+}
+
+#[test]
+fn provider_add_service_account_set_failure() {
+    // CICADA_SECRETS_DIR points at a file — the SecretStore::set
+    // map_err arm fires after the key validates.
+    let dir = tempfile::tempdir().unwrap();
+    let blocker = dir.path().join("secrets-file");
+    fs::write(&blocker, "not a dir").unwrap();
+    fs::write(
+        dir.path().join("key.json"),
+        r#"{"type":"service_account","client_email":"c@x.iam","private_key":"k"}"#,
+    )
+    .unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_cicada"))
+        .args(["provider", "add", "google", "--service-account", "key.json"])
+        .current_dir(dir.path())
+        .env("CICADA_SECRETS_DIR", &blocker)
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+}
+
+#[test]
+fn provider_add_oauth_error_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    let secrets = dir.path().join("secrets");
+
+    // (a) --code mentions `code=` but yields none → extract_code's `?`.
+    let out = Command::new(env!("CARGO_BIN_EXE_cicada"))
+        .args([
+            "provider",
+            "add",
+            "google",
+            "--client-id",
+            "cid",
+            "--client-secret",
+            "csec",
+            "--code",
+            "ecode=x",
+        ])
+        .current_dir(dir.path())
+        .env("CICADA_SECRETS_DIR", &secrets)
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("code"));
+
+    // (b) a dead token endpoint → the exchange map_err.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener); // nothing accepts — connection refused.
+    let out = Command::new(env!("CARGO_BIN_EXE_cicada"))
+        .args([
+            "provider",
+            "add",
+            "google",
+            "--client-id",
+            "cid",
+            "--client-secret",
+            "csec",
+            "--code",
+            "4/x",
+        ])
+        .current_dir(dir.path())
+        .env("CICADA_SECRETS_DIR", &secrets)
+        .env(
+            "CICADA_GOOGLE_TOKEN_URL",
+            format!("http://127.0.0.1:{port}/token"),
+        )
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+
+    // (c) CICADA_GOOGLE_TOKEN_URL unset → the TOKEN_URL fallback
+    // closure runs; a dead proxy keeps it off the real endpoint.
+    let out = Command::new(env!("CARGO_BIN_EXE_cicada"))
+        .args([
+            "provider",
+            "add",
+            "google",
+            "--client-id",
+            "cid",
+            "--client-secret",
+            "csec",
+            "--code",
+            "4/x",
+        ])
+        .current_dir(dir.path())
+        .env("CICADA_SECRETS_DIR", &secrets)
+        .env_remove("CICADA_GOOGLE_TOKEN_URL")
+        .env("HTTPS_PROXY", format!("http://127.0.0.1:{port}"))
+        .env("https_proxy", format!("http://127.0.0.1:{port}"))
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+}
+
+#[test]
+fn provider_add_oauth_read_code_failure() {
+    // The loopback request arrives without a `code` while stdin is
+    // at EOF — read_code errors out through the `?` in add_oauth.
+    let dir = tempfile::tempdir().unwrap();
+    let secrets = dir.path().join("secrets");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_cicada"))
+        .args([
+            "provider",
+            "add",
+            "google",
+            "--client-id",
+            "cid",
+            "--client-secret",
+            "csec",
+        ])
+        .current_dir(dir.path())
+        .env("CICADA_SECRETS_DIR", &secrets)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    drop(child.stdin.take()); // stdin EOF
+    // Scrape the loopback port off the printed hint, then send a
+    // code-less request so read_code's recv channel closes empty.
+    let port = {
+        use std::io::BufRead;
+        let mut found = None;
+        let reader = std::io::BufReader::new(child.stdout.as_mut().unwrap());
+        for line in reader.lines().map_while(Result::ok) {
+            if let Some(rest) = line.strip_prefix("a local listener on http://127.0.0.1:") {
+                found = rest
+                    .split(|c: char| !c.is_ascii_digit())
+                    .next()
+                    .and_then(|p| p.parse::<u16>().ok());
+                break;
+            }
+        }
+        found.expect("the child printed its loopback port")
+    };
+    let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    s.write_all(b"GET /?scope=x HTTP/1.0\r\n\r\n").unwrap();
+    drop(s);
+    let out = child.wait_with_output().unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no authorization code"));
+}
+
+#[test]
+fn provider_add_oauth_set_failure_after_exchange() {
+    // The exchange lands but the secrets dir is a file — the
+    // SecretStore::set map_err after a successful token swap.
+    let dir = tempfile::tempdir().unwrap();
+    let blocker = dir.path().join("secrets-blocker");
+    fs::write(&blocker, "not a dir").unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        use std::io::Read;
+        let mut buf = [0u8; 8192];
+        let _ = stream.read(&mut buf);
+        let body = br#"{"access_token":"ya29.t","expires_in":3600,"token_type":"Bearer","refresh_token":"rt-1"}"#;
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+            body.len(),
+            String::from_utf8_lossy(body)
+        );
+        stream.write_all(resp.as_bytes()).unwrap();
+    });
+    let out = Command::new(env!("CARGO_BIN_EXE_cicada"))
+        .args([
+            "provider",
+            "add",
+            "google",
+            "--client-id",
+            "cid",
+            "--client-secret",
+            "csec",
+            "--code",
+            "4/x",
+        ])
+        .current_dir(dir.path())
+        .env("CICADA_SECRETS_DIR", &blocker)
+        .env(
+            "CICADA_GOOGLE_TOKEN_URL",
+            format!("http://127.0.0.1:{port}/token"),
+        )
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+}
+
 // ---------- provider add: pasted code path ----------
 
 #[test]

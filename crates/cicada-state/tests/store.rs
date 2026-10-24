@@ -15,6 +15,18 @@ fn store_at(dir: &Path) -> JsonFileStateStore {
     JsonFileStateStore::new(dir.join(".cicada").join("state.yaml"))
 }
 
+#[test]
+fn new_accepts_every_path_arg_type() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("state.yaml");
+    // Each `Into<PathBuf>` flavor instantiates `new` separately.
+    let _ = JsonFileStateStore::new(&p);
+    let _ = JsonFileStateStore::new(p.clone());
+    let _ = JsonFileStateStore::new(p.to_string_lossy().into_owned());
+    let _ = JsonFileStateStore::new(p.to_string_lossy().into_owned().as_str());
+    let _ = JsonFileStateStore::new(p.as_path());
+}
+
 fn entry(key: &str) -> JournalEntry {
     JournalEntry {
         key: key.to_owned(),

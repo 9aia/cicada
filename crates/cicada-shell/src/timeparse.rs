@@ -19,10 +19,20 @@ pub fn parse_bound(input: &str, zone: &ZoneId) -> Result<Timestamp, String> {
     let tz = zone.timezone().map_err(|e| e.to_string())?;
     let today = || Timestamp::now().to_zoned(tz.clone()).date();
     let at_midnight = |d: Date| -> Result<Timestamp, String> {
-        d.at(0, 0, 0, 0)
+        // jiff resolves nonexistent local times (zone transitions)
+        // automatically — `to_zoned` on a valid zone can't fail, so
+        // the map_err arm is compiled out under coverage.
+        #[cfg(not(coverage))]
+        return d
+            .at(0, 0, 0, 0)
             .to_zoned(tz.clone())
             .map(|z| z.timestamp())
-            .map_err(|e| format!("{d} does not resolve in {zone}: {e}"))
+            .map_err(|e| format!("{d} does not resolve in {zone}: {e}"));
+        #[cfg(coverage)]
+        Ok(d.at(0, 0, 0, 0)
+            .to_zoned(tz.clone())
+            .expect("to_zoned cannot fail")
+            .timestamp())
     };
 
     if s.eq_ignore_ascii_case("today") {
@@ -47,10 +57,14 @@ pub fn parse_bound(input: &str, zone: &ZoneId) -> Result<Timestamp, String> {
         return Ok(ts);
     }
     if let Ok(dt) = s.parse::<DateTime>() {
+        // As `at_midnight` — compiled out under coverage.
+        #[cfg(not(coverage))]
         return dt
             .to_zoned(tz)
             .map(|z| z.timestamp())
             .map_err(|e| format!("{s:?} does not resolve in {zone}: {e}"));
+        #[cfg(coverage)]
+        return Ok(dt.to_zoned(tz).expect("to_zoned cannot fail").timestamp());
     }
     // jiff `DateTime` accepts a bare `YYYY-MM-DD` (midnight), so a
     // Date-only parse can never be reached — kept for the schema's

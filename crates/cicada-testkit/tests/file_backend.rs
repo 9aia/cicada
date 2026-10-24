@@ -193,16 +193,22 @@ async fn seed_and_edit_seams_cover_their_arms() {
     };
     p.seed(&cal, ev.clone());
     assert_eq!(p.events(&cal).len(), 1);
-    // Editing a missing remote id reports false.
-    assert!(!p.simulate_remote_edit(&cal, &RemoteId::new("nope"), |_| {}));
-    // …but the real one edits fine (state_hash-free event keeps going).
+    // Editing a missing remote id reports false; the real one edits
+    // fine (state_hash-free event keeps going). Both calls go through
+    // ONE callsite inside the loop — `impl FnOnce` monomorphizes per
+    // callsite, so a loop is the only way a single instantiation
+    // sees both the miss and the hit arms.
     ev.body.summary = "edited".into();
     p.seed(&cal, ev);
-    assert!(
-        p.simulate_remote_edit(&cal, &RemoteId::new("remote-1"), |b| {
-            b.location = Some("room".into());
+    let outcomes: Vec<bool> = ["nope", "remote-1"]
+        .into_iter()
+        .map(|id| {
+            p.simulate_remote_edit(&cal, &RemoteId::new(id), |b| {
+                b.location = Some("room".into());
+            })
         })
-    );
+        .collect();
+    assert_eq!(outcomes, [false, true]);
 }
 
 #[tokio::test]
@@ -269,4 +275,117 @@ fn expectation_debug_renders_outcome() {
     );
     let dbg = format!("{http:?}");
     assert!(dbg.contains("FixtureHttp"), "{dbg}");
+}
+
+#[test]
+fn open_instantiates_every_path_arg_type() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("f.json");
+    assert!(FakeFileProvider::open(&p).is_ok());
+    assert!(FakeFileProvider::open(p.clone()).is_ok());
+    assert!(FakeFileProvider::open("missing-a.json").is_ok());
+    assert!(FakeFileProvider::open("missing-b.json".to_owned()).is_ok());
+    let caps = ProviderCapabilities::permissive();
+    assert!(FakeFileProvider::open_with_capabilities(&p, caps.clone()).is_ok());
+    assert!(FakeFileProvider::open_with_capabilities(p.as_path(), caps.clone()).is_ok());
+    assert!(FakeFileProvider::open_with_capabilities(p.clone(), caps.clone()).is_ok());
+    assert!(FakeFileProvider::open_with_capabilities("m-c.json", caps.clone()).is_ok());
+    assert!(FakeFileProvider::open_with_capabilities("m-d.json".to_owned(), caps).is_ok());
+}
+
+#[tokio::test]
+async fn open_with_capabilities_error_arms_and_remote_edit_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    // Malformed JSON → the serde map_err arm.
+    let bad = dir.path().join("bad.json");
+    fs::write(&bad, "{not json").unwrap();
+    assert!(
+        FakeFileProvider::open_with_capabilities(&bad, ProviderCapabilities::permissive()).is_err()
+    );
+    // Wrong apiVersion → the version check arm.
+    let ver = dir.path().join("ver.json");
+    fs::write(&ver, r#"{"apiVersion":"cicada/fake-v0","calendars":{}}"#).unwrap();
+    assert!(
+        FakeFileProvider::open_with_capabilities(&ver, ProviderCapabilities::permissive()).is_err()
+    );
+    // Unreadable file (a directory) → the read error arm.
+    let asdir = dir.path().join("adir");
+    fs::create_dir_all(&asdir).unwrap();
+    assert!(
+        FakeFileProvider::open_with_capabilities(&asdir, ProviderCapabilities::permissive())
+            .is_err()
+    );
+
+    // An unreadable path (parent is a file) → the read error arm.
+    let blocker = dir.path().join("blocker");
+    fs::write(&blocker, "x").unwrap();
+    assert!(
+        FakeFileProvider::open_with_capabilities(
+            blocker.join("f.json"),
+            ProviderCapabilities::permissive(),
+        )
+        .is_err()
+    );
+
+    // persist() fails when the parent dir is replaced by a file
+    // after open — the create_dir_all arm.
+    let sub = dir.path().join("sub");
+    fs::create_dir_all(&sub).unwrap();
+    let p = FakeFileProvider::open(sub.join("f.json")).unwrap();
+    fs::remove_dir_all(&sub).unwrap();
+    fs::write(&sub, "x").unwrap();
+    assert!(
+        p.create_event(
+            &CalendarRef::new("primary"),
+            &body("x"),
+            &LocalId::new("x"),
+            &WriteOptions::default(),
+        )
+        .await
+        .is_err()
+    );
+
+    // persist() write arm — the parent dir goes read-only after
+    // open so the temp-file create fails.
+    let ro = dir.path().join("ro");
+    fs::create_dir_all(&ro).unwrap();
+    let p = FakeFileProvider::open(ro.join("f.json")).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&ro, fs::Permissions::from_mode(0o555)).unwrap();
+    }
+    assert!(
+        p.create_event(
+            &CalendarRef::new("primary"),
+            &body("x"),
+            &LocalId::new("x"),
+            &WriteOptions::default(),
+        )
+        .await
+        .is_err()
+    );
+
+    // `simulate_remote_edit` — miss on a live event and hit on a
+    // missing calendar arm.
+    let p = FakeCalendarProvider::new();
+    let cal = CalendarRef::new("primary");
+    let seeded = RemoteEvent {
+        remote_id: RemoteId::new("r1"),
+        tags: EventTags::default(),
+        etag: None,
+        updated: None,
+        body: body("x"),
+    };
+    p.seed(&cal, seeded);
+    assert!(!p.simulate_remote_edit(
+        &CalendarRef::new("missing-cal"),
+        &RemoteId::new("r1"),
+        |b| {
+            b.location = Some("l".into());
+        }
+    ));
+    assert!(p.simulate_remote_edit(&cal, &RemoteId::new("r1"), |b| {
+        b.summary = "edited".into();
+    }));
 }

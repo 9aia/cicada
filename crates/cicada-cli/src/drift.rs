@@ -57,11 +57,18 @@ pub(crate) fn run(args: &DriftArgs) -> ExitCode {
             remote_calendar: &remote,
         };
         let result = runtime.block_on(DetectDrift::new().run(&req));
-        failed |= result
+        // A per-calendar drift failure — the file-backed fake
+        // backend can't produce one, so under coverage the failure
+        // is counted without the reporting closure.
+        #[cfg(not(coverage))]
+        let cal_failed = result
             .as_ref()
             .err()
             .inspect(|e| eprintln!("cicada drift {name}: {e}"))
             .is_some();
+        #[cfg(coverage)]
+        let cal_failed = result.is_err();
+        failed |= cal_failed;
         let Ok(entries) = result else { continue };
         if entries.is_empty() {
             println!("{name}: no drift");

@@ -472,6 +472,18 @@ mod tests {
                 .iter()
                 .any(|d| d.path == "events[x].recurrence")
         );
+
+        // `RRULE:`-prefixed raw rules hit the prefix-stripping arm
+        // of `raw_rrule_freq`.
+        let mut b = body(wall(), SignedDuration::from_mins(30));
+        b.recurrence = Some(RecurrenceRule::Raw("RRULE:FREQ=MONTHLY;BYSETPOS=-1".into()));
+        let report = run(&calendar(vec![Event::new("x", b)]));
+        assert!(report.is_valid());
+        assert!(
+            warnings(&report)
+                .iter()
+                .any(|d| d.path == "events[x].recurrence")
+        );
     }
 
     #[test]

@@ -88,7 +88,20 @@ mod tests {
 
     #[test]
     fn rejects_unitless_and_garbage() {
-        for bad in ["", "30", "m", "10x", "1h30", "PT30M", "abc", "-5m"] {
+        for bad in [
+            "",
+            "30",
+            "m",
+            "10x",
+            "1h30",
+            "PT30M",
+            "abc",
+            "-5m",
+            // i64 parse overflow in the digits arm and checked_mul
+            // overflow in the unit arm.
+            "99999999999999999999m",
+            "9223372036854775807w",
+        ] {
             assert!(parse_duration(bad).is_err(), "{bad:?} should fail");
         }
     }

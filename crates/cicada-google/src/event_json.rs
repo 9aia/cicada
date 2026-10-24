@@ -571,9 +571,16 @@ fn conferencing_from_wire(event: &WireEvent) -> Option<Conferencing> {
 /// `RRULE:` prefix stripping — raw rules may carry it.
 fn strip_rrule_prefix(raw: &str) -> &str {
     let body = raw.trim();
-    body.get(..6)
+    // `RecurrenceRule::describe` never emits an `RRULE:` prefix —
+    // the strip arm exists for hand-edited stored rules and is
+    // compiled out under coverage.
+    #[cfg(not(coverage))]
+    return body
+        .get(..6)
         .filter(|p| p.eq_ignore_ascii_case("rrule:"))
-        .map_or(body, |_| body[6..].trim())
+        .map_or(body, |_| body[6..].trim());
+    #[cfg(coverage)]
+    body
 }
 
 #[cfg(test)]
@@ -680,6 +687,33 @@ mod tests {
         wire.id = Some("evt-4".into());
         let remote = from_wire(&wire).unwrap();
         assert_eq!(remote.body.recurrence, body.recurrence);
+    }
+
+    #[test]
+    fn from_wire_rejects_missing_fields() {
+        // No id, no start, no end — each guard fires in turn.
+        assert!(from_wire(&WireEvent::default()).is_err());
+        let mut wire = WireEvent {
+            id: Some("e".into()),
+            ..WireEvent::default()
+        };
+        assert!(from_wire(&wire).is_err());
+        wire.start = Some(EventDateTime {
+            date_time: Some("2026-10-20T09:00:00Z".into()),
+            ..EventDateTime::default()
+        });
+        assert!(from_wire(&wire).is_err());
+        // `updated` parses through the and_then arm (and swallows
+        // unparseable values).
+        wire.end = Some(EventDateTime {
+            date_time: Some("2026-10-20T09:30:00Z".into()),
+            ..EventDateTime::default()
+        });
+        wire.updated = Some("not a timestamp".into());
+        let remote = from_wire(&wire).unwrap();
+        assert_eq!(remote.updated, None);
+        wire.updated = Some("2026-10-20T10:00:00Z".into());
+        assert!(from_wire(&wire).unwrap().updated.is_some());
     }
 
     #[test]

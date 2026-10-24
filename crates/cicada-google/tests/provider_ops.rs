@@ -707,3 +707,52 @@ async fn end_to_end_op_sequence() {
     assert_eq!(methods, ["GET", "POST", "GET", "GET", "PATCH", "DELETE"]);
     assert!(http.is_exhausted());
 }
+
+#[test]
+fn with_base_url_variants_and_bad_bases() {
+    let http = Arc::new(FixtureHttp::new());
+    // `with_base_url` generic instantiations.
+    let _ = provider(&http).with_base_url("http://x".to_owned());
+    let _ = provider(&http).with_base_url("http://y");
+}
+
+#[tokio::test]
+async fn bad_base_urls_error_on_any_op() {
+    let http = Arc::new(FixtureHttp::new());
+    // Unparseable base → Url::parse arm.
+    let p = provider(&http).with_base_url("not a url");
+    assert!(p.get_event(&cal(), &"r".into()).await.is_err());
+    // Cannot-be-a-base scheme → path_segments arm.
+    let p = provider(&http).with_base_url("mailto:a@b.c");
+    assert!(p.get_event(&cal(), &"r".into()).await.is_err());
+}
+
+#[tokio::test]
+async fn malformed_event_payload_errors() {
+    let http = Arc::new(FixtureHttp::new());
+    http.expect_fn(|_| true, Ok(json_response(200, "not json")));
+    let p = provider(&http);
+    let local = "standup".into();
+    assert!(
+        p.create_event(&cal(), &body("x"), &local, &opts())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn conference_request_id_falls_back_without_idempotency_key() {
+    let http = Arc::new(FixtureHttp::new());
+    http.expect_fn(|_| true, Ok(json_response(200, EVENT_FULL)));
+    let p = provider(&http);
+    let mut b = body("meet");
+    b.conferencing = Some(Conferencing::Meet);
+    let o = WriteOptions {
+        send_updates: SendUpdates::None,
+        idempotency_key: None,
+        etag: None,
+    };
+    let local = "standup".into();
+    let _ = p.create_event(&cal(), &b, &local, &o).await;
+    assert!(http.requests()[0].url.contains("conferenceDataVersion=1"));
+}

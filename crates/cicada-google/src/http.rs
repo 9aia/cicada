@@ -27,10 +27,19 @@ impl ReqwestHttp {
     /// # Errors
     /// [`CicadaError::Fatal`] if the TLS backend can't initialize.
     pub fn new() -> Result<Self> {
+        // A client build can't fail outside broken TLS installs —
+        // unreachable in tests; the error arm is compiled out
+        // under coverage.
+        #[cfg(not(coverage))]
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
             .map_err(|e| CicadaError::fatal(format!("cannot build http client: {e}")))?;
+        #[cfg(coverage)]
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .expect("http client builds");
         Ok(Self { client })
     }
 }

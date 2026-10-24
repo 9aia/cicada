@@ -79,6 +79,83 @@ async fn preview_and_apply(session: &Session, issued: &IssuedDigests) -> Value {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn tool_errors_when_provider_or_calendars_fail() {
+    let dir = tempfile::tempdir().unwrap();
+    // provider() inside the tool fails — google selected but no
+    // credentials in the environment (open() only resolves the
+    // name; the adapter builds per call).
+    fs::create_dir_all(dir.path().join("calendars")).unwrap();
+    fs::write(
+        dir.path().join("cicada.yaml"),
+        "apiVersion: cicada/v1\nkind: Manifest\ncalendars: [calendars/work.yaml]\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("calendars/work.yaml"),
+        "apiVersion: cicada/v1\nkind: Calendar\nmetadata: {name: work, timeZone: UTC}\nspec: {events: []}\n",
+    )
+    .unwrap();
+    let session = Session::open(&ServerOptions {
+        root: Some(dir.path().to_path_buf()),
+        provider: Some("google".into()),
+        fake_file: None,
+        state: None,
+    })
+    .unwrap();
+    let out = tools::dispatch(&session, &issued(), "cicada.plan.preview", args(json!({}))).await;
+    assert!(out.is_error, "{}", out.text);
+
+    // calendars() fails when a declared file turns unreadable.
+    let session = fixture(dir.path());
+    fs::write(dir.path().join("calendars/work.yaml"), "not: [valid\n").unwrap();
+    let out = tools::dispatch(&session, &issued(), "cicada.plan.preview", args(json!({}))).await;
+    assert!(out.is_error, "{}", out.text);
+    let out = tools::dispatch(&session, &issued(), "cicada.calendar.list", None).await;
+    assert!(out.is_error, "{}", out.text);
+    let out = tools::dispatch(
+        &session,
+        &issued(),
+        "cicada.events.show",
+        args(json!({ "id": "standup" })),
+    )
+    .await;
+    assert!(out.is_error, "{}", out.text);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn issued_mutex_poisoning_is_tolerated() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = fixture(dir.path());
+    let issued = issued();
+    // Issue a digest normally.
+    let preview = tools::dispatch(&session, &issued, "cicada.plan.preview", args(json!({}))).await;
+    assert!(!preview.is_error, "{}", preview.text);
+    let digest = preview.structured["planDigest"]
+        .as_str()
+        .expect("planDigest")
+        .to_owned();
+    // Poison the digest mutex — a panic inside the guard.
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _g = issued.lock().unwrap();
+        panic!("poison");
+    }));
+    // Next preview's `if let Ok` arm can't take — tolerated.
+    let out = tools::dispatch(&session, &issued, "cicada.plan.preview", args(json!({}))).await;
+    assert!(!out.is_error, "{}", out.text);
+    // Apply's membership check sees the poisoned mutex as "not
+    // issued" — the `is_ok_and` guard-false arm reports unknown.
+    let out = tools::dispatch(
+        &session,
+        &issued,
+        "cicada.plan.apply",
+        args(json!({ "planDigest": digest, "confirm": true })),
+    )
+    .await;
+    assert!(out.is_error);
+    assert!(out.text.contains("unknown planDigest"), "{}", out.text);
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn calendar_list_reports_declared() {
     let dir = tempfile::tempdir().unwrap();
     let session = fixture(dir.path());
@@ -347,4 +424,123 @@ async fn bad_arguments_are_fatal_tool_errors() {
     .await;
     assert!(out.is_error);
     assert!(out.text.contains("invalid arguments"), "{}", out.text);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn store_and_provider_failures_surface_as_tool_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = fixture(dir.path());
+    let set = issued();
+    // First apply lands recorded state — `calendar.list` then reads
+    // the recorded-events arm.
+    let _ = preview_and_apply(&session, &set).await;
+    let out = tools::dispatch(&session, &set, "cicada.calendar.list", None).await;
+    assert_eq!(out.structured["calendars"][0]["recordedEvents"], 1);
+
+    // A malformed state file fails every store().load() caller.
+    fs::write(dir.path().join(".cicada/state.yaml"), "bogus: [").unwrap();
+    for tool in [
+        "cicada.calendar.list",
+        "cicada.state.drift",
+        "cicada.plan.preview",
+    ] {
+        let out = tools::dispatch(&session, &set, tool, None).await;
+        assert!(out.is_error, "{tool} should fail on a malformed state file");
+    }
+    let out = tools::dispatch(&session, &set, "cicada.state.refresh", None).await;
+    assert!(out.is_error);
+    // plan.apply routes through plan_apply_locked → plan_all's load
+    // failure.
+    let out = tools::dispatch(
+        &session,
+        &set,
+        "cicada.plan.apply",
+        args(json!({ "planDigest": "x", "confirm": true })),
+    )
+    .await;
+    assert!(out.is_error);
+
+    // A lock whose parent path is a file fails lock() inside
+    // refresh/apply.
+    fs::write(dir.path().join("blocker"), "x").unwrap();
+    let session2 = Session::open(&ServerOptions {
+        root: Some(dir.path().to_path_buf()),
+        provider: None,
+        fake_file: None,
+        state: Some(dir.path().join("blocker/state.yaml")),
+    })
+    .expect("session opens");
+    let out = tools::dispatch(&session2, &set, "cicada.state.refresh", None).await;
+    assert!(out.is_error);
+    // With the digest issued, apply gets past the gates and the
+    // lock() failure surfaces from plan_apply_locked's `?` arm.
+    set.lock().unwrap().insert("sha256:x".to_owned());
+    let out = tools::dispatch(
+        &session2,
+        &set,
+        "cicada.plan.apply",
+        args(json!({ "planDigest": "sha256:x", "confirm": true })),
+    )
+    .await;
+    assert!(out.is_error);
+
+    // An unresolvable provider name fails provider() inside each
+    // state tool — the map_err(fatal) arms.
+    let session3 = Session::open(&ServerOptions {
+        root: Some(dir.path().to_path_buf()),
+        provider: Some("google".to_owned()),
+        fake_file: None,
+        state: None,
+    })
+    .expect("session opens");
+    for tool in ["cicada.state.drift", "cicada.state.refresh"] {
+        let out = tools::dispatch(&session3, &set, tool, None).await;
+        assert!(out.is_error, "{tool}");
+    }
+    let out = tools::dispatch(
+        &session3,
+        &set,
+        "cicada.plan.apply",
+        args(json!({ "planDigest": "x", "confirm": true })),
+    )
+    .await;
+    assert!(out.is_error);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn apply_errors_when_the_plan_has_error_diagnostics() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = fixture(dir.path());
+    let set = issued();
+    // An unexpandable recurrence yields a plan-time error → apply
+    // refuses (ApplyPlan::run error arm).
+    fs::write(
+        dir.path().join("calendars/work.yaml"),
+        "apiVersion: cicada/v1\n\
+         kind: Calendar\n\
+         metadata:\n\
+         \x20 name: work\n\
+         \x20 timeZone: UTC\n\
+         spec:\n\
+         \x20 events:\n\
+         \x20   - id: standup\n\
+         \x20     summary: S\n\
+         \x20     start: \"2026-01-05T09:00:00\"\n\
+         \x20     duration: 30m\n\
+         \x20     recurrence: { freq: HOURLY }\n",
+    )
+    .unwrap();
+    let preview = tools::dispatch(&session, &set, "cicada.plan.preview", args(json!({}))).await;
+    let digest = preview.structured["planDigest"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let out = tools::dispatch(
+        &session,
+        &set,
+        "cicada.plan.apply",
+        args(json!({ "planDigest": digest, "confirm": true })),
+    )
+    .await;
+    assert!(out.is_error);
 }

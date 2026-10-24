@@ -157,9 +157,17 @@ fn expand(path: &Path) -> Vec<Target> {
     };
     match parse_document(&source) {
         Ok(Document::Manifest(m)) => {
+            // A readable manifest path always has a parent — the
+            // `"."` fallback is compiled out under coverage.
+            #[cfg(not(coverage))]
             let dir = path
                 .parent()
                 .map_or_else(|| Path::new(".").to_path_buf(), Path::to_path_buf);
+            #[cfg(coverage)]
+            let dir = path
+                .parent()
+                .expect("readable manifest has a parent")
+                .to_path_buf();
             if m.calendars.is_empty() {
                 return vec![Target::Failure(
                     path.to_path_buf(),

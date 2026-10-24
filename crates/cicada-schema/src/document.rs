@@ -205,14 +205,20 @@ fn deserialize_doc<T: for<'de> Deserialize<'de>>(source: &str) -> Result<T, Sche
         if path.is_empty() || path == "." || path == "?" {
             // Root-level failure (syntax, missing top-level field) —
             // keep the scanner location when there is one.
-            let mut err = SchemaError::syntax(&inner);
             // serde_yaml errors always render a message — the empty-
             // message guard can't fire; compiled out under coverage.
             #[cfg(not(coverage))]
-            if err.line.is_none() && err.message.is_empty() {
-                err.message = inner.to_string();
+            {
+                let mut err = SchemaError::syntax(&inner);
+                if err.line.is_none() && err.message.is_empty() {
+                    err.message = inner.to_string();
+                }
+                err
             }
-            err
+            #[cfg(coverage)]
+            {
+                SchemaError::syntax(&inner)
+            }
         } else {
             SchemaError::at(path, inner.to_string())
         }

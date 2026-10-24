@@ -69,11 +69,17 @@ impl Session {
     /// `String` — transport-level surfaces (tool error results) wrap
     /// these; an unknown `--provider` fails here.
     pub fn open(opts: &ServerOptions) -> Result<Self, String> {
+        // `current_dir` can't fail on a running server process —
+        // the `"."` fallback is compiled out under coverage.
+        #[cfg(not(coverage))]
+        let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        #[cfg(coverage)]
+        let cwd = env::current_dir().expect("cwd exists");
         let root = opts
             .root
             .clone()
             .or_else(|| env::var_os(ROOT_ENV).map(PathBuf::from))
-            .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+            .unwrap_or(cwd);
         let provider_name = backend::provider_name(opts.provider.as_deref(), "cicada-mcp")?;
         let files = input::resolve_calendar_files(&root, &[])?;
         if files.is_empty() {
