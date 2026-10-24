@@ -299,4 +299,58 @@ mod tests {
         assert_eq!(occs[0].local_start, date(2026, 1, 5).at(9, 0, 0, 0));
         assert_eq!(occs[0].end.to_string(), "2026-01-05T09:30:00Z");
     }
+
+    #[test]
+    fn remote_with_unexpandable_rule_errors() {
+        let mut b = body(wall(date(2026, 1, 5), 9, "UTC"));
+        b.recurrence = Some(RecurrenceRule::Raw("FREQ=MINUTELY;COUNT=5".into()));
+        let remote = RemoteEvent {
+            remote_id: "r-1".into(),
+            tags: EventTags::default(),
+            etag: None,
+            updated: None,
+            body: b,
+        };
+        let r = range("2026-01-01T00:00:00Z", "2026-02-01T00:00:00Z");
+        assert!(QueryRange.expand_remote(&[remote], r).is_err());
+    }
+
+    #[test]
+    fn occurrence_end_overflow_errors() {
+        // A duration that pushes the occurrence end past the civil
+        // ceiling → clean Fatal, not a panic.
+        let mut b = body(wall(date(2026, 1, 5), 9, "UTC"));
+        b.time = EventTime::Span {
+            start: wall(date(2026, 1, 5), 9, "UTC"),
+            duration: SignedDuration::MAX,
+        };
+        let ev = Event::new("huge", b);
+        let r = range("2026-01-01T00:00:00Z", "2026-02-01T00:00:00Z");
+        assert!(QueryRange.expand([&ev], r).is_err());
+
+        // A civil end inside the representable range whose instant is
+        // not: start 00:00 UTC-12 materializes (12:00Z), but end
+        // 23:30 local sits past Timestamp::MAX. (A DST-gap end does
+        // NOT error — jiff disambiguates gaps.)
+        let mut b = body(wall(date(9999, 12, 31), 0, "Etc/GMT+12"));
+        b.time = EventTime::Span {
+            start: wall(date(9999, 12, 31), 0, "Etc/GMT+12"),
+            duration: SignedDuration::from_mins(23 * 60 + 30),
+        };
+        let ev = Event::new("over-the-edge", b);
+        // Timestamp::MAX precedes 9999-12-31 — the bounds below are
+        // the last parseable day; the event errors materializing.
+        let r = range("9999-12-29T00:00:00Z", "9999-12-30T00:00:00Z");
+        assert!(QueryRange.expand([&ev], r).is_err());
+
+        // Start materializes (21:00Z < Timestamp::MAX) but the civil
+        // end's instant is past it — the `local_end.to_zoned` arm.
+        let mut b = body(wall(date(9999, 12, 30), 9, "Etc/GMT+12"));
+        b.time = EventTime::Span {
+            start: wall(date(9999, 12, 30), 9, "Etc/GMT+12"),
+            duration: SignedDuration::from_hours(20),
+        };
+        let ev = Event::new("end-over-the-edge", b);
+        assert!(QueryRange.expand([&ev], r).is_err());
+    }
 }

@@ -170,3 +170,18 @@ pub trait CalendarProvider: Send + Sync {
     /// answer must return `Fatal`, never a fake empty list.
     async fn free_busy(&self, calendar: &CalendarRef, range: TimeRange) -> Result<Vec<TimeRange>>;
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn calendar_ref_converts_and_displays() {
+        let from_string = CalendarRef::from(String::from("cal"));
+        let from_str = CalendarRef::from("cal");
+        assert_eq!(from_string.as_str(), "cal");
+        assert_eq!(from_str.to_string(), "cal");
+        assert_eq!(CalendarRef::new("cal"), from_str);
+    }
+}

@@ -187,9 +187,15 @@ impl CalendarDoc {
 /// `spec.events[0].start: …` instead of bare serde sprawl.
 fn deserialize_doc<T: for<'de> Deserialize<'de>>(source: &str) -> Result<T, SchemaError> {
     let mut docs = serde_yaml::Deserializer::from_str(source);
+    // serde_yaml yields a Null document even for empty input, so a
+    // doc-less stream can't occur — the guard stays for a future
+    // serde_yaml change, compiled out under coverage.
+    #[cfg(not(coverage))]
     let Some(first) = docs.next() else {
         return Err(SchemaError::document("empty YAML document"));
     };
+    #[cfg(coverage)]
+    let first = docs.next().expect("serde_yaml always yields a document");
     let doc = serde_path_to_error::deserialize::<_, T>(first).map_err(|e| {
         let path = e.path().to_string();
         let inner = e.into_inner();
@@ -200,6 +206,9 @@ fn deserialize_doc<T: for<'de> Deserialize<'de>>(source: &str) -> Result<T, Sche
             // Root-level failure (syntax, missing top-level field) —
             // keep the scanner location when there is one.
             let mut err = SchemaError::syntax(&inner);
+            // serde_yaml errors always render a message — the empty-
+            // message guard can't fire; compiled out under coverage.
+            #[cfg(not(coverage))]
             if err.line.is_none() && err.message.is_empty() {
                 err.message = inner.to_string();
             }

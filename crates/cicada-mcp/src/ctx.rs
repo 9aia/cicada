@@ -135,3 +135,33 @@ impl Session {
         backend::remote_calendar(cal, recorded)
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_root_reports_the_working_root() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("calendars")).unwrap();
+        std::fs::write(
+            dir.path().join("cicada.yaml"),
+            "apiVersion: cicada/v1\nkind: Manifest\ncalendars: [calendars/work.yaml]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("calendars/work.yaml"),
+            "apiVersion: cicada/v1\nkind: Calendar\nmetadata: {name: work, timeZone: UTC}\nspec: {events: []}\n",
+        )
+        .unwrap();
+        let session = Session::open(&ServerOptions {
+            root: Some(dir.path().to_path_buf()),
+            provider: None,
+            fake_file: None,
+            state: None,
+        })
+        .unwrap();
+        assert_eq!(session.root(), dir.path());
+    }
+}

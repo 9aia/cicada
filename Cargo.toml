@@ -72,6 +72,10 @@ url = "2.5"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+# cargo-llvm-cov sets `--cfg coverage` for instrumented builds —
+# allow `#[cfg(not(coverage))]` on genuinely-unreachable defensive
+# arms as a last-resort exclusion (see AGENTS coverage guidance).
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage)"] }
 
 [workspace.lints.clippy]
 # Hard gates: deny classes that hide real bugs.

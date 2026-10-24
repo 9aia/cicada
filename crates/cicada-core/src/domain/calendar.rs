@@ -139,4 +139,12 @@ mod tests {
         let ids: Vec<&str> = cal.events.keys().map(LocalId::as_str).collect();
         assert_eq!(ids, ["alpha", "zebra"]);
     }
+
+    #[test]
+    fn is_empty_tracks_event_count() {
+        let mut cal = Calendar::new("work", "UTC").unwrap();
+        assert!(cal.is_empty());
+        cal.insert(event("a")).unwrap();
+        assert!(!cal.is_empty());
+    }
 }

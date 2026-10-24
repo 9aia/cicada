@@ -75,3 +75,34 @@ pub struct NoopLogger;
 impl Logger for NoopLogger {
     fn log(&self, _level: LogLevel, _message: &str, _fields: &[(&str, &str)]) {}
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn level_names_and_display() {
+        for (level, name) in [
+            (LogLevel::Trace, "trace"),
+            (LogLevel::Debug, "debug"),
+            (LogLevel::Info, "info"),
+            (LogLevel::Warn, "warn"),
+            (LogLevel::Error, "error"),
+        ] {
+            assert_eq!(level.as_str(), name);
+            assert_eq!(level.to_string(), name);
+        }
+    }
+
+    #[test]
+    fn convenience_methods_delegate_to_log() {
+        let noop = NoopLogger;
+        noop.info("i");
+        noop.warn("w");
+        noop.error("e");
+        noop.debug("d");
+        noop.trace("t");
+        noop.log(LogLevel::Info, "direct", &[("k", "v")]);
+    }
+}

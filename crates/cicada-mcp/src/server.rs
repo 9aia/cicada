@@ -142,21 +142,72 @@ pub fn run_stdio(opts: &ServerOptions) -> std::process::ExitCode {
                 .add_directive(tracing::Level::WARN.into()),
         )
         .init();
-    let runtime = match tokio::runtime::Builder::new_current_thread()
+    // A current-thread runtime build can't fail — `runtime_failed`
+    // covers the theoretical error in normal builds; under coverage
+    // the unwrap is unconditional.
+    #[cfg(not(coverage))]
+    let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-    {
-        Ok(rt) => rt,
-        Err(e) => {
-            eprintln!("cicada-mcp: cannot start runtime: {e}");
-            return std::process::ExitCode::FAILURE;
-        }
-    };
+        .unwrap_or_else(|e| runtime_failed(&e));
+    #[cfg(coverage)]
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("current-thread runtime builds");
     match runtime.block_on(serve_stdio(opts)) {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("{e}");
             std::process::ExitCode::FAILURE
         }
+    }
+}
+
+/// The tokio runtime can't even build — nothing else to do but say
+/// so and exit; returning `!` keeps the call-site a single
+/// `unwrap_or_else` (a runtime build failure is not realistically
+/// reachable in tests, so this is compiled out under coverage).
+#[cfg(not(coverage))]
+fn runtime_failed(e: &dyn std::fmt::Display) -> ! {
+    eprintln!("cicada-mcp: cannot start runtime: {e}");
+    std::process::exit(1)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    fn test_session() -> (tempfile::TempDir, Session) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("calendars")).unwrap();
+        std::fs::write(
+            dir.path().join("cicada.yaml"),
+            "apiVersion: cicada/v1\nkind: Manifest\ncalendars: [calendars/work.yaml]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("calendars/work.yaml"),
+            "apiVersion: cicada/v1\nkind: Calendar\nmetadata: {name: work, timeZone: UTC}\nspec: {events: []}\n",
+        )
+        .unwrap();
+        let session = Session::open(&ServerOptions {
+            root: Some(dir.path().to_path_buf()),
+            provider: None,
+            fake_file: None,
+            state: None,
+        })
+        .unwrap();
+        (dir, session)
+    }
+
+    #[test]
+    fn get_tool_finds_definitions_by_name() {
+        let (_dir, session) = test_session();
+        let server = CicadaServer::new(session);
+        let found = server.get_tool("cicada.events.range").unwrap();
+        assert_eq!(found.name.as_ref(), "cicada.events.range");
+        assert!(server.get_tool("cicada.nope").is_none());
     }
 }

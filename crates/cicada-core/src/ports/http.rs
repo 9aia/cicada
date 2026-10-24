@@ -127,3 +127,36 @@ pub trait Http: Send + Sync {
     /// failures are `Transient` (or `Auth` for TLS/identity issues).
     async fn send(&self, request: &HttpRequest) -> Result<HttpResponse>;
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn method_wire_names() {
+        for (m, s) in [
+            (HttpMethod::Get, "GET"),
+            (HttpMethod::Post, "POST"),
+            (HttpMethod::Put, "PUT"),
+            (HttpMethod::Patch, "PATCH"),
+            (HttpMethod::Delete, "DELETE"),
+        ] {
+            assert_eq!(m.as_str(), s);
+        }
+    }
+
+    #[test]
+    fn request_builders() {
+        let req = HttpRequest::new(HttpMethod::Get, "http://x")
+            .header("a", "b")
+            .json(&serde_json::json!({"k": 1}))
+            .unwrap();
+        assert!(req.headers.contains(&("a".to_owned(), "b".to_owned())));
+        assert!(
+            req.headers
+                .contains(&("content-type".to_owned(), "application/json".to_owned()))
+        );
+        assert_eq!(req.body.as_deref(), Some(br#"{"k":1}"#.as_slice()));
+    }
+}

@@ -78,3 +78,25 @@ pub trait AuthProvider: Send + Sync {
     /// surface the token flow instead of retrying blindly.
     async fn credentials(&self) -> Result<Credentials>;
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn token_is_redacted_in_debug_and_display() {
+        let token = Token::new("s3cret");
+        assert_eq!(format!("{token:?}"), "Token([redacted])");
+        assert_eq!(token.to_string(), "[redacted]");
+        assert_eq!(token.expose(), "s3cret");
+    }
+
+    #[test]
+    fn credentials_default_scheme_on_deserialize() {
+        let creds: Credentials = serde_json::from_str(r#"{"accessToken":"abc"}"#).unwrap();
+        assert_eq!(creds.scheme, "Bearer");
+        assert_eq!(creds.authorization_header(), "Bearer abc");
+        assert!(!creds.is_expired(Timestamp::now()));
+    }
+}

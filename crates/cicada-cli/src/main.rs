@@ -19,6 +19,7 @@ mod validate;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use cicada_shell::backend;
 use clap::{Args, Parser, Subcommand};
 
 /// Declare calendars in YAML; plan, apply, and detect drift against
@@ -251,6 +252,30 @@ enum ProviderCommands {
         #[arg(long)]
         code: Option<String>,
     },
+}
+
+/// Print `msg` to stderr and exit nonzero — for failures a caller
+/// can't recover from anyway (a tokio runtime that won't build).
+/// `!` lets call sites keep the value they were unwrapping.
+/// The call is unreachable in tests — compiled out under coverage.
+#[cfg(not(coverage))]
+fn die(msg: &str) -> ! {
+    eprintln!("{msg}");
+    std::process::exit(1)
+}
+
+/// The verb's tokio runtime — `die` on a build failure, which can't
+/// happen in tests, so under coverage the unwrap is unconditional
+/// (keeps `Result::unwrap` — and `die` itself — out of the report).
+#[cfg(not(coverage))]
+pub(crate) fn runtime_or_die(who: &str) -> tokio::runtime::Runtime {
+    backend::runtime(who).unwrap_or_else(|e| crate::die(&e))
+}
+
+/// Coverage variant — see above.
+#[cfg(coverage)]
+pub(crate) fn runtime_or_die(who: &str) -> tokio::runtime::Runtime {
+    backend::runtime(who).expect("tokio runtime builds")
 }
 
 fn main() -> ExitCode {

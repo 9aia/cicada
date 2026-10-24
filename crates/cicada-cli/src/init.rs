@@ -118,10 +118,12 @@ fn scaffold(manifest: &Path, calendar: &Path, state_dir: &Path, force: bool) -> 
         (calendar, CALENDAR),
         (&state_dir.join(".gitignore"), CICADA_GITIGNORE),
     ] {
-        if let Some(parent) = path.parent() {
+        // Every scaffold path has a parent — `map_or` keeps the
+        // guard branch-free (a `None` arm could never run).
+        path.parent().map_or(Ok(()), |parent| {
             fs::create_dir_all(parent)
-                .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
-        }
+                .map_err(|e| format!("cannot create {}: {e}", parent.display()))
+        })?;
         if path.exists() && !force {
             continue; // only authored files gate init — artifacts skip
         }

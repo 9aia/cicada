@@ -378,10 +378,10 @@ mod tests {
     #[test]
     fn span_computes_end_in_wall_time() {
         let b = body();
-        let Time::Wall { local, .. } = b.time.end().unwrap() else {
-            panic!("expected wall end");
-        };
-        assert_eq!(local, date(2026, 1, 5).at(9, 30, 0, 0));
+        assert!(matches!(
+            b.time.end().unwrap(),
+            Time::Wall { local, .. } if local == date(2026, 1, 5).at(9, 30, 0, 0)
+        ));
     }
 
     #[test]
@@ -479,5 +479,43 @@ mod tests {
         let mut e = e;
         e.summary = "Renamed".into();
         assert_eq!(e.body.summary, "Renamed");
+    }
+
+    #[test]
+    fn conferencing_display_and_parse() {
+        assert_eq!(Conferencing::Meet.to_string(), "meet");
+        assert_eq!(Conferencing::Teams.to_string(), "teams");
+        assert_eq!(Conferencing::Other("zoom".into()).to_string(), "zoom");
+        assert_eq!(
+            "teams".parse::<Conferencing>().unwrap(),
+            Conferencing::Teams
+        );
+        assert_eq!(
+            "zoom".parse::<Conferencing>().unwrap(),
+            Conferencing::Other("zoom".into())
+        );
+        assert!("".parse::<Conferencing>().is_err());
+    }
+
+    #[test]
+    fn body_validate_passes_and_rejects_instant_recurring() {
+        body().validate().unwrap();
+        let mut b = body();
+        b.recurrence = Some(crate::domain::recurrence::RecurrenceRule::Raw(
+            "FREQ=DAILY".into(),
+        ));
+        b.time = EventTime::Span {
+            start: Time::Instant("2026-01-05T09:00:00Z".parse().unwrap()),
+            duration: SignedDuration::from_mins(30),
+        };
+        let err = b.validate().unwrap_err();
+        assert!(err.to_string().contains("wall-time start"));
+    }
+
+    #[test]
+    fn event_validate_checks_id_and_body() {
+        Event::new("standup", body()).validate().unwrap();
+        let err = Event::new("  ", body()).validate().unwrap_err();
+        assert!(err.to_string().contains("empty"));
     }
 }

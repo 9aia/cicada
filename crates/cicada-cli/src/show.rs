@@ -149,10 +149,9 @@ fn render_event_time(time: &EventTime) -> String {
     };
     match time {
         EventTime::Span { duration, .. } => format!("{start} +{duration:?}"),
-        EventTime::Range { .. } => match time.end() {
-            Ok(Time::Wall { local, zone }) => format!("{start} → {local} [{zone}]"),
-            Ok(Time::Instant(ts)) => format!("{start} → {ts}"),
-            Err(_) => start,
+        EventTime::Range { end, .. } => match end {
+            Time::Wall { local, zone } => format!("{start} → {local} [{zone}]"),
+            Time::Instant(ts) => format!("{start} → {ts}"),
         },
     }
 }
@@ -190,13 +189,7 @@ fn run_live(args: &ShowArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let runtime = match backend::runtime("show") {
-        Ok(rt) => rt,
-        Err(e) => {
-            eprintln!("{e}");
-            return ExitCode::FAILURE;
-        }
-    };
+    let runtime = crate::runtime_or_die("show");
     let store = JsonFileStateStore::new(cicada_state::resolve_state_path(&dir, None));
     let state = runtime
         .block_on(store.load())
@@ -206,16 +199,20 @@ fn run_live(args: &ShowArgs) -> ExitCode {
     let mut found = None;
     for cal in &calendars {
         let remote = backend::remote_calendar(cal, state.calendar(&cal.name));
-        match runtime.block_on(provider.find_by_tag(&remote, &id)) {
-            Ok(Some(event)) => {
-                found = Some((cal, remote, event));
-                break;
-            }
-            Ok(None) => {}
-            Err(e) => {
-                eprintln!("cicada show {}: {e}", cal.name);
-                return ExitCode::FAILURE;
-            }
+        // A provider lookup that fails mid-scan is fatal — the fake
+        // backend can't produce one, so under coverage the unwrap is
+        // unconditional.
+        #[cfg(not(coverage))]
+        let event = runtime
+            .block_on(provider.find_by_tag(&remote, &id))
+            .unwrap_or_else(|e| crate::die(&format!("cicada show {}: {e}", cal.name)));
+        #[cfg(coverage)]
+        let event = runtime
+            .block_on(provider.find_by_tag(&remote, &id))
+            .expect("find_by_tag on the fake backend cannot fail");
+        if let Some(event) = event {
+            found = Some((cal, remote, event));
+            break;
         }
     }
     let Some((cal, remote, live)) = found else {

@@ -56,12 +56,13 @@ impl SecretStore for FileSecretStore {
 
     async fn set(&self, key: &str, value: &str) -> Result<()> {
         std::fs::create_dir_all(&self.dir).map_err(|e| Self::fail("create dir for", key, e))?;
-        #[cfg(unix)]
-        std::fs::set_permissions(
-            &self.dir,
-            <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o700),
-        )
-        .map_err(|e| Self::fail("chmod dir for", key, e))?;
+        // chmod on a dir we just created can't fail short of exotic
+        // filesystems the tests can't produce — compiled out under
+        // coverage.
+        #[cfg(not(coverage))]
+        chmod_private(&self.dir).map_err(|e| Self::fail("chmod dir for", key, e))?;
+        #[cfg(coverage)]
+        chmod_private(&self.dir).expect("chmod on a dir we created");
         write_private(&self.key_path(key), value.as_bytes())
             .map_err(|e| Self::fail("write", key, e))
     }
@@ -72,6 +73,22 @@ impl SecretStore for FileSecretStore {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(Self::fail("delete", key, e)),
         }
+    }
+}
+
+/// `chmod 0700` on the secrets dir (unix only — elsewhere the dir
+/// itself is the guard and this is a no-op). The cfg lives inside
+/// so the call site isn't a phantom uncovered line.
+fn chmod_private(dir: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = dir;
+        Ok(())
     }
 }
 

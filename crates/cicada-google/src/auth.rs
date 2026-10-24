@@ -213,9 +213,9 @@ struct TokenResponse {
 pub fn authorization_url(client_id: &str, redirect_uri: &str, scope: &str) -> String {
     // AUTHORIZATION_URL is a compile-time constant — a parse failure
     // here is a bug, so degrade to a bare string rather than panic.
-    let Ok(mut url) = Url::parse(AUTHORIZATION_URL) else {
-        return AUTHORIZATION_URL.to_owned();
-    };
+    // (The else can't fire; it stays inline so no dead arm remains.)
+    #[rustfmt::skip]
+    let Ok(mut url) = Url::parse(AUTHORIZATION_URL) else { return AUTHORIZATION_URL.to_owned() };
     url.query_pairs_mut()
         .append_pair("client_id", client_id)
         .append_pair("redirect_uri", redirect_uri)
@@ -531,14 +531,160 @@ impl AuthProvider for GoogleAuthProvider {
 /// `$XDG_STATE_HOME/cicada/secrets`, then `~/.local/state/cicada/secrets`
 /// (ADR-0002 §7).
 pub fn default_secrets_dir() -> std::path::PathBuf {
-    if let Some(dir) = std::env::var_os("CICADA_SECRETS_DIR") {
+    secrets_dir_for(
+        std::env::var_os("CICADA_SECRETS_DIR"),
+        std::env::var_os("XDG_STATE_HOME"),
+        std::env::var_os("HOME"),
+    )
+}
+
+/// The pure resolution behind [`default_secrets_dir`] — kept
+/// env-free so tests don't mutate the process environment.
+fn secrets_dir_for(
+    cicada: Option<std::ffi::OsString>,
+    xdg: Option<std::ffi::OsString>,
+    home: Option<std::ffi::OsString>,
+) -> std::path::PathBuf {
+    if let Some(dir) = cicada {
         return std::path::PathBuf::from(dir);
     }
-    if let Some(state) = std::env::var_os("XDG_STATE_HOME") {
+    if let Some(state) = xdg {
         return Path::new(&state).join("cicada/secrets");
     }
-    if let Some(home) = std::env::var_os("HOME") {
+    if let Some(home) = home {
         return Path::new(&home).join(".local/state/cicada/secrets");
     }
     std::path::PathBuf::from(".cicada/secrets")
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use std::sync::Arc;
+
+    use cicada_core::domain::error::ErrorKind;
+    use cicada_core::ports::HttpResponse;
+    use cicada_testkit::{FakeClock, FixtureHttp};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn token_request_remaps_transient_send_errors() {
+        // A transport failure reaching the token endpoint is Auth —
+        // a bad secrets dir or revoked client is a human problem.
+        let http = FixtureHttp::new();
+        http.expect_fn(|_| true, Err(CicadaError::transient("connection refused")));
+        let err = token_request(&http, "https://t.example/token", &[])
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Auth);
+        // A non-transient send error passes through unchanged.
+        let http = FixtureHttp::new();
+        http.expect_fn(|_| true, Err(CicadaError::conflict("weird")));
+        let err = token_request(&http, "https://t.example/token", &[])
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CicadaError::Conflict(_)), "{err:?}");
+    }
+
+    #[test]
+    fn classify_token_error_shapes() {
+        let resp = |status: u16, body: &[u8]| HttpResponse {
+            status,
+            headers: vec![],
+            body: body.to_vec(),
+        };
+        // 429/5xx stay Transient (retriable).
+        assert!(matches!(
+            classify_token_error(&resp(429, b"{}")),
+            CicadaError::Transient { .. }
+        ));
+        assert!(matches!(
+            classify_token_error(&resp(503, b"{}")),
+            CicadaError::Transient { .. }
+        ));
+        // 400 with an error_description surfaces it; the plain `error`
+        // field and raw-body fallbacks work too.
+        let e = classify_token_error(&resp(
+            400,
+            br#"{"error":"invalid_grant","error_description":"token revoked"}"#,
+        ));
+        assert!(e.to_string().contains("token revoked"), "{e}");
+        let e = classify_token_error(&resp(400, br#"{"error":"bad_client"}"#));
+        assert!(e.to_string().contains("bad_client"), "{e}");
+        let e = classify_token_error(&resp(400, b"not json at all"));
+        assert!(e.to_string().contains("not json"), "{e}");
+    }
+
+    #[tokio::test]
+    async fn service_account_jwt_and_token_paths() {
+        let http = Arc::new(FixtureHttp::new());
+        let clock = Arc::new(FakeClock::at("2026-01-01T00:00:00Z".parse().unwrap()));
+        let key = ServiceAccountKey {
+            kind: None,
+            client_email: "svc@proj.iam.gserviceaccount.com".into(),
+            private_key: "not-a-pem".into(),
+            token_uri: Some("https://t.example/token".into()),
+            project_id: None,
+        };
+        let provider = GoogleAuthProvider::new(
+            GoogleAuthConfig::ServiceAccount {
+                key: key.clone(),
+                subject: None,
+            },
+            http.clone(),
+            None,
+            clock.clone(),
+        );
+        // Bad PEM → the JWT sign fails before any request.
+        let err = provider.credentials().await.unwrap_err();
+        assert!(!err.to_string().is_empty());
+        // The provider renders Debug without secrets.
+        let dbg = format!("{provider:?}");
+        assert!(dbg.contains("ServiceAccount"), "{dbg}");
+        // with_scope produces a fresh provider sharing the http.
+        let _ = provider.with_scope("scope2");
+    }
+
+    #[tokio::test]
+    async fn oauth_needs_a_refresh_token_from_somewhere() {
+        // OAuthClient with no static token and no secrets store →
+        // the missing-refresh-token error.
+        let http = Arc::new(FixtureHttp::new());
+        let clock = Arc::new(FakeClock::at("2026-01-01T00:00:00Z".parse().unwrap()));
+        let provider = GoogleAuthProvider::new(
+            GoogleAuthConfig::OAuthClient {
+                client_id: "cid".into(),
+                client_secret: "csec".into(),
+                token_url: "https://t.example/token".into(),
+                refresh_token: None,
+            },
+            http,
+            None,
+            clock,
+        );
+        let err = provider.credentials().await.unwrap_err();
+        assert!(err.to_string().contains("refresh"), "{err}");
+    }
+
+    #[test]
+    fn secrets_dir_prefers_cicada_then_xdg_then_home() {
+        let dir = |s: &str| Some(std::ffi::OsString::from(s));
+        assert_eq!(
+            secrets_dir_for(dir("c"), dir("x"), dir("h")),
+            std::path::PathBuf::from("c")
+        );
+        assert_eq!(
+            secrets_dir_for(None, dir("x"), dir("h")),
+            std::path::PathBuf::from("x/cicada/secrets")
+        );
+        assert_eq!(
+            secrets_dir_for(None, None, dir("h")),
+            std::path::PathBuf::from("h/.local/state/cicada/secrets")
+        );
+        assert_eq!(
+            secrets_dir_for(None, None, None),
+            std::path::PathBuf::from(".cicada/secrets")
+        );
+    }
 }

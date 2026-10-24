@@ -325,8 +325,8 @@ fn emit_end(end: &Time, start: &Time) -> String {
 /// rules that map onto the model normalize to it; exotic RRULEs
 /// keep their string.
 fn emit_recurrence(rule: &RecurrenceRule) -> RecurrenceEmit {
-    match rule.as_structured() {
-        Some(rule) => RecurrenceEmit::Structured(RuleEmit {
+    if let Some(rule) = rule.as_structured() {
+        RecurrenceEmit::Structured(RuleEmit {
             freq: rule.freq,
             by_day: rule.by_day,
             by_month_day: rule.by_month_day,
@@ -334,13 +334,14 @@ fn emit_recurrence(rule: &RecurrenceRule) -> RecurrenceEmit {
             interval: rule.interval,
             count: rule.count,
             until: rule.until,
-        }),
-        None => match rule {
-            RecurrenceRule::Raw(raw) => RecurrenceEmit::Raw(raw.clone()),
-            RecurrenceRule::Structured(_) => {
-                unreachable!("structured rules always map to the model")
-            }
-        },
+        })
+    } else {
+        // `as_structured` covers every Structured rule — a rule
+        // that didn't normalize must be Raw (the else can't fire;
+        // it stays inline so no dead arm remains).
+        #[rustfmt::skip]
+        let RecurrenceRule::Raw(raw) = rule else { unreachable!() };
+        RecurrenceEmit::Raw(raw.clone())
     }
 }
 
@@ -393,6 +394,9 @@ fn format_local(local: DateTime) -> String {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    use cicada_core::domain::ids::ZoneId;
+    use jiff::civil::date;
+
     use super::*;
     use crate::parse_calendar;
 
@@ -531,5 +535,62 @@ spec:
 ";
         let (_, emitted) = round_trip(yaml);
         assert!(emitted.contains("sendUpdates: none"), "{emitted}");
+    }
+
+    #[test]
+    fn emit_end_renders_overnight_and_instant() {
+        let zone = ZoneId::new_unchecked("UTC");
+        let start = Time::Wall {
+            local: date(2026, 1, 5).at(9, 0, 0, 0),
+            zone: zone.clone(),
+        };
+        // Same-day end → clock only.
+        let end = Time::Wall {
+            local: date(2026, 1, 5).at(10, 0, 0, 0),
+            zone: zone.clone(),
+        };
+        assert_eq!(emit_end(&end, &start), "10:00");
+        // A different-day wall end renders fully (not the overnight
+        // HH:MM shorthand — that's only for the *next* day).
+        let end = Time::Wall {
+            local: date(2026, 1, 8).at(10, 0, 0, 0),
+            zone: zone.clone(),
+        };
+        let rendered = emit_end(&end, &start);
+        assert!(rendered.contains("01-08"), "{rendered}");
+        // An instant end renders its timestamp.
+        let end = Time::Instant("2026-01-05T12:00:00Z".parse().unwrap());
+        let rendered = emit_end(&end, &start);
+        assert!(rendered.contains('T'), "{rendered}");
+        // Mixed forms — a wall end against an instant start renders
+        // fully (no clock shorthand without matching wall starts).
+        let start = Time::Instant("2026-01-05T09:00:00Z".parse().unwrap());
+        let end = Time::Wall {
+            local: date(2026, 1, 5).at(10, 0, 0, 0),
+            zone,
+        };
+        let rendered = emit_end(&end, &start);
+        assert!(rendered.contains("2026-01-05"), "{rendered}");
+    }
+
+    #[test]
+    fn format_duration_signs_and_zero() {
+        assert_eq!(format_duration(SignedDuration::from_mins(90)), "1h30m");
+        assert_eq!(format_duration(SignedDuration::from_mins(-45)), "-45m");
+        assert_eq!(format_duration(SignedDuration::from_secs(45)), "45s");
+        assert_eq!(format_duration(SignedDuration::ZERO), "0s");
+        assert_eq!(format_duration(SignedDuration::from_hours(2)), "2h");
+        assert_eq!(format_duration(SignedDuration::from_hours(26)), "1d2h");
+    }
+
+    #[test]
+    fn format_clock_and_local_render_seconds() {
+        let t: Clock = "09:30:45".parse().unwrap();
+        assert_eq!(format_clock(t), "09:30:45");
+        let local: DateTime = date(2026, 1, 5).at(9, 30, 45, 0);
+        let rendered = format_local(local);
+        assert!(rendered.contains(":45"), "{rendered}");
+        let t2: Clock = "09:30:00".parse().unwrap();
+        assert_eq!(format_clock(t2), "09:30");
     }
 }

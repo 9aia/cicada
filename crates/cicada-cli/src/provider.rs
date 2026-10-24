@@ -135,22 +135,10 @@ fn add_oauth(
     // A loopback listener captures the code automatically when it can
     // bind; the paste path always works (remote shells, firewalls).
     let listener = TcpListener::bind("127.0.0.1:0").ok();
-    let redirect_uri = listener.as_ref().map_or_else(
-        || LOOPBACK_REDIRECT.to_owned(),
-        |l| {
-            l.local_addr()
-                .map_or_else(|_| LOOPBACK_REDIRECT.to_owned(), |a| format!("http://{a}"))
-        },
-    );
+    let redirect_uri = redirect_uri(listener.as_ref());
     let url = authorization_url(&client_id, &redirect_uri, CALENDAR_SCOPE);
     println!("authorize cicada in your browser:\n\n  {url}\n");
-    if listener.is_some() {
-        println!("a local listener on {redirect_uri} will capture the code —");
-        println!("or paste the authorization code / redirect URL below.");
-    } else {
-        println!("after consent the browser lands on a dead localhost page — copy the");
-        println!("full URL (or just the `code` value) from the address bar and paste it here.");
-    }
+    print_capture_hint(listener.is_some(), &redirect_uri);
 
     let pasted = match flag_code {
         Some(code) => code.to_owned(),
@@ -196,6 +184,26 @@ fn add_oauth(
         "use `--provider google` on plan/apply/drift/range/show, or `cicada mcp --provider google`."
     );
     Ok(())
+}
+
+/// The OAuth redirect URI the loopback listener will serve — or the
+/// "manual paste" placeholder when no listener bound.
+fn redirect_uri(listener: Option<&TcpListener>) -> String {
+    let Some(addr) = listener.and_then(|l| l.local_addr().ok()) else {
+        return LOOPBACK_REDIRECT.to_owned();
+    };
+    format!("http://{addr}")
+}
+
+/// How the code will come back — listener or manual paste.
+fn print_capture_hint(has_listener: bool, redirect_uri: &str) {
+    if has_listener {
+        println!("a local listener on {redirect_uri} will capture the code —");
+        println!("or paste the authorization code / redirect URL below.");
+    } else {
+        println!("after consent the browser lands on a dead localhost page — copy the");
+        println!("full URL (or just the `code` value) from the address bar and paste it here.");
+    }
 }
 
 /// First non-empty stdin line vs. the loopback capture — whichever
@@ -297,4 +305,97 @@ fn extract_code(input: &str) -> Result<String, String> {
         return Err("couldn't find a `code` parameter in the pasted value".to_owned());
     }
     Ok(s.to_owned())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_code_accepts_each_pasted_shape() {
+        assert_eq!(extract_code("4/abc").unwrap(), "4/abc");
+        assert_eq!(extract_code("  4/abc  ").unwrap(), "4/abc");
+        assert_eq!(
+            extract_code("http://localhost/?code=4/xyz&scope=cal").unwrap(),
+            "4/xyz"
+        );
+        // A fragment that isn't a URL still finds `code=`.
+        assert_eq!(extract_code("state=1&code=4%2Ffrag").unwrap(), "4%2Ffrag");
+        for bad in ["", "   ", "scope=x&ycode=z"] {
+            assert!(extract_code(bad).is_err(), "{bad:?}");
+        }
+        // A URL whose `code=` substring is only part of another key
+        // — the pair loop runs to the end and errors.
+        assert!(extract_code("http://localhost/?acode=1").is_err());
+    }
+
+    #[test]
+    fn redirect_uri_and_capture_hint_cover_no_listener() {
+        // No listener → the loopback placeholder + paste
+        // instructions.
+        assert_eq!(redirect_uri(None), LOOPBACK_REDIRECT);
+        print_capture_hint(false, LOOPBACK_REDIRECT);
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let uri = redirect_uri(Some(&listener));
+        assert!(uri.starts_with("http://127.0.0.1:"), "{uri}");
+        print_capture_hint(true, &uri);
+    }
+
+    #[test]
+    fn capture_loopback_reads_code_or_answers_400() {
+        // The happy path: a request carrying `code` is returned.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let client = std::thread::spawn(move || {
+            let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+            write!(s, "GET /?code=4%2Floop&scope=x HTTP/1.0\r\n\r\n").unwrap();
+            let mut body = String::new();
+            s.read_to_string(&mut body).unwrap();
+            body
+        });
+        assert_eq!(capture_loopback(&listener).unwrap(), "4/loop");
+        let page = client.join().unwrap();
+        assert!(page.contains("200 OK"), "{page}");
+
+        // No `code` parameter → a 400 page and an error.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let client = std::thread::spawn(move || {
+            let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+            write!(s, "GET /?scope=x HTTP/1.0\r\n\r\n").unwrap();
+            let mut body = String::new();
+            s.read_to_string(&mut body).unwrap();
+            body
+        });
+        let err = capture_loopback(&listener).unwrap_err();
+        assert!(err.contains("no `code`"), "{err}");
+        let page = client.join().unwrap();
+        assert!(page.contains("400 Bad Request"), "{page}");
+    }
+
+    #[test]
+    fn read_code_without_listener_reads_one_stdin_line() {
+        // `read_code(None)` falls back to stdin — in the test process
+        // stdin is at EOF, so the line comes back empty and the
+        // caller's extract_code reports the empty code.
+        let line = read_code(None).unwrap();
+        assert_eq!(line.trim(), "");
+        assert!(extract_code(&line).is_err());
+    }
+
+    #[test]
+    fn read_code_with_listener_takes_the_loopback_code() {
+        // With a listener bound, whichever arrives first wins —
+        // connect a client that pastes the code so the loopback
+        // thread supplies it.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let client = std::thread::spawn(move || {
+            let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+            write!(s, "GET /?code=4%2Fvia-listener HTTP/1.0\r\n\r\n").unwrap();
+        });
+        assert_eq!(read_code(Some(listener)).unwrap(), "4/via-listener");
+        client.join().unwrap();
+    }
 }

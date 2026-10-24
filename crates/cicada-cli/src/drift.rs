@@ -33,13 +33,7 @@ pub(crate) fn run(args: &DriftArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let runtime = match backend::runtime("drift") {
-        Ok(rt) => rt,
-        Err(e) => {
-            eprintln!("{e}");
-            return ExitCode::FAILURE;
-        }
-    };
+    let runtime = crate::runtime_or_die("drift");
     let state = match runtime.block_on(store.load()) {
         Ok(s) => s,
         Err(e) => {
@@ -62,20 +56,20 @@ pub(crate) fn run(args: &DriftArgs) -> ExitCode {
             provider: &provider,
             remote_calendar: &remote,
         };
-        match runtime.block_on(DetectDrift::new().run(&req)) {
-            Ok(entries) if entries.is_empty() => {
-                println!("{name}: no drift");
-            }
-            Ok(entries) => {
-                drifted += entries.len();
-                println!("{name}: {} drifted", entries.len());
-                for entry in &entries {
-                    println!("  {}", drift_line(entry));
-                }
-            }
-            Err(e) => {
-                eprintln!("cicada drift {name}: {e}");
-                failed = true;
+        let result = runtime.block_on(DetectDrift::new().run(&req));
+        failed |= result
+            .as_ref()
+            .err()
+            .inspect(|e| eprintln!("cicada drift {name}: {e}"))
+            .is_some();
+        let Ok(entries) = result else { continue };
+        if entries.is_empty() {
+            println!("{name}: no drift");
+        } else {
+            drifted += entries.len();
+            println!("{name}: {} drifted", entries.len());
+            for entry in &entries {
+                println!("  {}", drift_line(entry));
             }
         }
     }

@@ -120,13 +120,7 @@ fn run_live(args: &RangeArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let runtime = match backend::runtime("range") {
-        Ok(rt) => rt,
-        Err(e) => {
-            eprintln!("{e}");
-            return ExitCode::FAILURE;
-        }
-    };
+    let runtime = crate::runtime_or_die("range");
     // Recorded state only feeds the remote-calendar binding; absence
     // means `metadata.calendarId`/`primary`.
     let store = JsonFileStateStore::new(cicada_state::resolve_state_path(&dir, None));

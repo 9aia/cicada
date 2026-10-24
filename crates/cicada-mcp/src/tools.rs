@@ -465,10 +465,10 @@ async fn events_range(session: &Session, params: &RangeParams) -> ToolOutcome {
         let occurrences = match &provider {
             Some(provider) => {
                 let remote = session.remote_calendar(cal, state.calendar(&cal.name));
-                match provider.list_events(&remote, Some(window)).await {
-                    Ok(live) => QueryRange::new().expand_remote(&live, window),
-                    Err(e) => Err(e),
-                }
+                provider
+                    .list_events(&remote, Some(window))
+                    .await
+                    .and_then(|live| QueryRange::new().expand_remote(&live, window))
             }
             None => QueryRange::new().expand(cal.events.values(), window),
         };
@@ -554,24 +554,27 @@ fn events_show(session: &Session, params: &ShowParams) -> ToolOutcome {
 
 /// `cicada.state.drift` — recorded vs live for every recorded slice.
 async fn state_drift(session: &Session) -> ToolOutcome {
-    let state = match session.store().load().await {
-        Ok(s) => s,
-        Err(e) => return ToolOutcome::cicada(&e),
-    };
+    state_drift_inner(session).await.unwrap_or_else(|e| e)
+}
+
+/// The body of [`state_drift`] — `Result` internally so store/
+/// provider failures short-circuit through `?`.
+async fn state_drift_inner(session: &Session) -> Result<ToolOutcome, ToolOutcome> {
+    let state = session
+        .store()
+        .load()
+        .await
+        .map_err(|e| ToolOutcome::cicada(&e))?;
     if state.calendars.is_empty() {
-        return ToolOutcome::ok(
+        return Ok(ToolOutcome::ok(
             "no recorded state — nothing applied yet",
             json!({ "calendars": [], "totalDrifted": 0 }),
-        );
+        ));
     }
-    let provider = match session.provider("cicada.state.drift") {
-        Ok(p) => p,
-        Err(e) => return ToolOutcome::fatal(e),
-    };
-    let calendars = match session.calendars() {
-        Ok(c) => c,
-        Err(e) => return ToolOutcome::fatal(e),
-    };
+    let provider = session
+        .provider("cicada.state.drift")
+        .map_err(ToolOutcome::fatal)?;
+    let calendars = session.calendars().map_err(ToolOutcome::fatal)?;
 
     let mut per_calendar = Vec::new();
     let mut text = String::new();
@@ -584,24 +587,23 @@ async fn state_drift(session: &Session) -> ToolOutcome {
             provider: &provider,
             remote_calendar: &remote,
         };
-        match DetectDrift::new().run(&req).await {
-            Ok(entries) => {
-                total += entries.len();
-                let _ = writeln!(text, "{name}: {}", drift_summary(&entries));
-                per_calendar.push(json!({
-                    "calendar": name,
-                    "calendarId": remote.as_str(),
-                    "drifted": entries.len(),
-                    "drift": entries,
-                }));
-            }
-            Err(e) => return ToolOutcome::cicada(&e),
-        }
+        let entries = DetectDrift::new()
+            .run(&req)
+            .await
+            .map_err(|e| ToolOutcome::cicada(&e))?;
+        total += entries.len();
+        let _ = writeln!(text, "{name}: {}", drift_summary(&entries));
+        per_calendar.push(json!({
+            "calendar": name,
+            "calendarId": remote.as_str(),
+            "drifted": entries.len(),
+            "drift": entries,
+        }));
     }
-    ToolOutcome::ok(
+    Ok(ToolOutcome::ok(
         text.trim_end().to_owned(),
         json!({ "calendars": per_calendar, "totalDrifted": total }),
-    )
+    ))
 }
 
 // ------------------------------------------------------------------
@@ -611,28 +613,31 @@ async fn state_drift(session: &Session) -> ToolOutcome {
 /// `cicada.state.refresh` — fold live into recorded, under the
 /// advisory lock (ADR-0002 §7).
 async fn state_refresh(session: &Session) -> ToolOutcome {
-    let _guard = match session.store().lock() {
-        Ok(g) => g,
-        Err(e) => return ToolOutcome::cicada(&e),
-    };
-    let state = match session.store().load().await {
-        Ok(s) => s,
-        Err(e) => return ToolOutcome::cicada(&e),
-    };
+    state_refresh_inner(session).await.unwrap_or_else(|e| e)
+}
+
+/// The body of [`state_refresh`] — `Result` internally so store/
+/// provider failures short-circuit through `?`.
+async fn state_refresh_inner(session: &Session) -> Result<ToolOutcome, ToolOutcome> {
+    let _guard = session
+        .store()
+        .lock()
+        .map_err(|e| ToolOutcome::cicada(&e))?;
+    let state = session
+        .store()
+        .load()
+        .await
+        .map_err(|e| ToolOutcome::cicada(&e))?;
     if state.calendars.is_empty() {
-        return ToolOutcome::ok(
+        return Ok(ToolOutcome::ok(
             "no recorded state — nothing applied yet",
             json!({ "calendars": [] }),
-        );
+        ));
     }
-    let provider = match session.provider("cicada.state.refresh") {
-        Ok(p) => p,
-        Err(e) => return ToolOutcome::fatal(e),
-    };
-    let calendars = match session.calendars() {
-        Ok(c) => c,
-        Err(e) => return ToolOutcome::fatal(e),
-    };
+    let provider = session
+        .provider("cicada.state.refresh")
+        .map_err(ToolOutcome::fatal)?;
+    let calendars = session.calendars().map_err(ToolOutcome::fatal)?;
     let clock = SystemClock;
 
     let mut reports = Vec::new();
@@ -646,35 +651,37 @@ async fn state_refresh(session: &Session) -> ToolOutcome {
             state: session.store(),
             clock: &clock,
         };
-        match RefreshState::new().run(&req).await {
-            Ok(report) => {
-                let _ = writeln!(
-                    text,
-                    "{}: {} updated · {} removed · {} unchanged · {} adoption candidate{}",
-                    report.calendar,
-                    report.updated.len(),
-                    report.removed.len(),
-                    report.unchanged,
-                    report.adoption_candidates.len(),
-                    if report.adoption_candidates.len() == 1 {
-                        ""
-                    } else {
-                        "s"
-                    },
-                );
-                reports.push(json!({
-                    "calendar": report.calendar,
-                    "unchanged": report.unchanged,
-                    "updated": report.updated,
-                    "removed": report.removed,
-                    "reconciled": report.reconciled,
-                    "adoptionCandidates": report.adoption_candidates,
-                }));
-            }
-            Err(e) => return ToolOutcome::cicada(&e),
-        }
+        let report = RefreshState::new()
+            .run(&req)
+            .await
+            .map_err(|e| ToolOutcome::cicada(&e))?;
+        let _ = writeln!(
+            text,
+            "{}: {} updated · {} removed · {} unchanged · {} adoption candidate{}",
+            report.calendar,
+            report.updated.len(),
+            report.removed.len(),
+            report.unchanged,
+            report.adoption_candidates.len(),
+            if report.adoption_candidates.len() == 1 {
+                ""
+            } else {
+                "s"
+            },
+        );
+        reports.push(json!({
+            "calendar": report.calendar,
+            "unchanged": report.unchanged,
+            "updated": report.updated,
+            "removed": report.removed,
+            "reconciled": report.reconciled,
+            "adoptionCandidates": report.adoption_candidates,
+        }));
     }
-    ToolOutcome::ok(text.trim_end().to_owned(), json!({ "calendars": reports }))
+    Ok(ToolOutcome::ok(
+        text.trim_end().to_owned(),
+        json!({ "calendars": reports }),
+    ))
 }
 
 // ------------------------------------------------------------------
@@ -692,15 +699,16 @@ async fn plan_preview(
         Ok(n) => n,
         Err(e) => return ToolOutcome::cicada(&e),
     };
-    let staged = match plan_all(session, notify).await {
+    let provider = match session.provider("cicada.plan.preview") {
+        Ok(p) => p,
+        Err(e) => return ToolOutcome::fatal(e),
+    };
+    let staged = match plan_all(session, &provider, notify).await {
         Ok(p) => p,
         Err(outcome) => return outcome,
     };
     let plans: Vec<&Plan> = staged.iter().map(|(_, p)| p).collect();
-    let digest = match plans_digest(&plans) {
-        Ok(d) => d,
-        Err(e) => return ToolOutcome::fatal(e),
-    };
+    let digest = plans_digest(&plans);
     if let Ok(mut set) = issued.lock() {
         set.insert(digest.clone());
     }
@@ -774,49 +782,55 @@ async fn plan_apply(
         Err(e) => return ToolOutcome::cicada(&e),
     };
 
+    plan_apply_locked(session, issued, params, notify, digest)
+        .await
+        .unwrap_or_else(|e| e)
+}
+
+/// `plan_apply` past the confirmation gates — lock, re-plan, verify,
+/// execute. Returns `Result` internally so every store/provider
+/// failure short-circuits through `?` into one `ToolOutcome`.
+async fn plan_apply_locked(
+    session: &Session,
+    issued: &IssuedDigests,
+    params: &ApplyParams,
+    notify: Option<SendUpdates>,
+    digest: &str,
+) -> Result<ToolOutcome, ToolOutcome> {
     // The advisory lock spans re-plan + apply: the digest check and
     // the writes must see one consistent recorded/live snapshot
     // (ADR-0002 §4/§7).
-    let _guard = match session.store().lock() {
-        Ok(g) => g,
-        Err(e) => return ToolOutcome::cicada(&e),
-    };
-    let staged = match plan_all(session, notify).await {
-        Ok(p) => p,
-        Err(outcome) => return outcome,
-    };
+    let _guard = session
+        .store()
+        .lock()
+        .map_err(|e| ToolOutcome::cicada(&e))?;
+    let provider = session
+        .provider("cicada.plan.apply")
+        .map_err(ToolOutcome::fatal)?;
+    let staged = plan_all(session, &provider, notify).await?;
     let plans: Vec<&Plan> = staged.iter().map(|(_, p)| p).collect();
-    match plans_digest(&plans) {
-        Ok(fresh) if fresh != digest => {
-            return ToolOutcome::fatal(format!(
-                "stale planDigest — desired, live, or recorded state changed since \
-                 this preview was issued (expected {digest}, re-planned to {fresh}). \
-                 Run cicada.plan.preview again and apply the new digest."
-            ));
-        }
-        Ok(_) => {}
-        Err(e) => return ToolOutcome::fatal(e),
+    let fresh = plans_digest(&plans);
+    if fresh != digest {
+        return Ok(ToolOutcome::fatal(format!(
+            "stale planDigest — desired, live, or recorded state changed since \
+             this preview was issued (expected {digest}, re-planned to {fresh}). \
+             Run cicada.plan.preview again and apply the new digest."
+        )));
     }
     // The digest is spent — a second apply must re-preview.
     if let Ok(mut set) = issued.lock() {
         set.remove(digest);
     }
 
-    let provider = match session.provider("cicada.plan.apply") {
-        Ok(p) => p,
-        Err(e) => return ToolOutcome::fatal(e),
-    };
     let clock = SystemClock;
 
     let mut results = Vec::new();
     let mut text = String::new();
     let mut any_failed = false;
     for (cal, plan) in &staged {
-        let remote = remote_for_cal(session, cal).await;
-        let remote = match remote {
-            Ok(r) => r,
-            Err(e) => return ToolOutcome::cicada(&e),
-        };
+        let remote = remote_for_cal(session, cal)
+            .await
+            .map_err(|e| ToolOutcome::cicada(&e))?;
         let send_updates = notify.unwrap_or(cal.send_updates);
         let req = ApplyRequest {
             plan,
@@ -830,34 +844,33 @@ async fn plan_apply(
             resume: params.resume,
             clock: &clock,
         };
-        match ApplyPlan::new().run(&req).await {
-            Ok(report) => {
-                any_failed |= report.has_failures();
-                let _ = writeln!(
-                    text,
-                    "{}: {} applied · {} skipped · {} failed",
-                    report.calendar,
-                    report.applied(),
-                    report.skipped(),
-                    report.failed(),
-                );
-                results.push(json!({
-                    "calendar": report.calendar,
-                    "applied": report.applied(),
-                    "skipped": report.skipped(),
-                    "failed": report.failed(),
-                    "outcomes": report.outcomes.iter().map(outcome_json).collect::<Vec<_>>(),
-                }));
-            }
-            Err(e) => return ToolOutcome::cicada(&e),
-        }
+        let report = ApplyPlan::new()
+            .run(&req)
+            .await
+            .map_err(|e| ToolOutcome::cicada(&e))?;
+        any_failed |= report.has_failures();
+        let _ = writeln!(
+            text,
+            "{}: {} applied · {} skipped · {} failed",
+            report.calendar,
+            report.applied(),
+            report.skipped(),
+            report.failed(),
+        );
+        results.push(json!({
+            "calendar": report.calendar,
+            "applied": report.applied(),
+            "skipped": report.skipped(),
+            "failed": report.failed(),
+            "outcomes": report.outcomes.iter().map(outcome_json).collect::<Vec<_>>(),
+        }));
     }
     let mut outcome = ToolOutcome::ok(
         text.trim_end().to_owned(),
         json!({ "calendars": results, "digest": digest }),
     );
     outcome.is_error = any_failed;
-    outcome
+    Ok(outcome)
 }
 
 // ------------------------------------------------------------------
@@ -869,12 +882,10 @@ async fn plan_apply(
 /// misalign the two across re-loads.
 async fn plan_all(
     session: &Session,
+    provider: &dyn CalendarProvider,
     notify: Option<SendUpdates>,
 ) -> Result<Vec<(Calendar, Plan)>, ToolOutcome> {
     let calendars = session.calendars().map_err(ToolOutcome::fatal)?;
-    let provider = session
-        .provider("cicada.plan")
-        .map_err(ToolOutcome::fatal)?;
     let state = session
         .store()
         .load()
@@ -889,15 +900,16 @@ async fn plan_all(
         let req = PlanRequest {
             desired: cal,
             recorded,
-            provider: &provider,
+            provider,
             remote_calendar: &remote,
             clock: &clock,
             send_updates: notify.unwrap_or(cal.send_updates),
         };
-        match PlanCalendar::new().run(&req).await {
-            Ok(plan) => staged.push((cal.clone(), plan)),
-            Err(e) => return Err(ToolOutcome::cicada(&e)),
-        }
+        let plan = PlanCalendar::new()
+            .run(&req)
+            .await
+            .map_err(|e| ToolOutcome::cicada(&e))?;
+        staged.push((cal.clone(), plan));
     }
     Ok(staged)
 }
@@ -974,59 +986,181 @@ fn drift_summary(entries: &[DriftEntry]) -> String {
 /// One apply outcome as JSON — `status` plus remote id or the error
 /// + its class (ADR-0002 §8).
 fn outcome_json(o: &cicada_core::application::OpOutcome) -> Value {
-    let mut v = json!({
-        "op": o.op.code(),
-        "localId": o.local_id.as_str(),
-        "key": o.key,
-    });
-    if let Some(obj) = v.as_object_mut() {
-        match &o.result {
-            OpResult::Applied { remote_id } => {
-                obj.insert("status".into(), json!("applied"));
-                if let Some(id) = remote_id {
-                    obj.insert("remoteId".into(), json!(id.as_str()));
-                }
-            }
-            OpResult::AlreadyApplied { remote_id } => {
-                obj.insert("status".into(), json!("alreadyApplied"));
-                if let Some(id) = remote_id {
-                    obj.insert("remoteId".into(), json!(id.as_str()));
-                }
-            }
-            OpResult::SkippedResume => {
-                obj.insert("status".into(), json!("skippedResume"));
-            }
-            OpResult::Noop => {
-                obj.insert("status".into(), json!("noop"));
-            }
-            OpResult::Failed(e) => {
-                obj.insert("status".into(), json!("failed"));
-                obj.insert("error".into(), json!(e.to_string()));
-                obj.insert("errorKind".into(), json!(kind_code(e.kind())));
+    let mut obj = Map::new();
+    obj.insert("op".into(), json!(o.op.code()));
+    obj.insert("localId".into(), json!(o.local_id.as_str()));
+    obj.insert("key".into(), json!(o.key));
+    match &o.result {
+        OpResult::Applied { remote_id } => {
+            obj.insert("status".into(), json!("applied"));
+            if let Some(id) = remote_id {
+                obj.insert("remoteId".into(), json!(id.as_str()));
             }
         }
+        OpResult::AlreadyApplied { remote_id } => {
+            obj.insert("status".into(), json!("alreadyApplied"));
+            if let Some(id) = remote_id {
+                obj.insert("remoteId".into(), json!(id.as_str()));
+            }
+        }
+        OpResult::SkippedResume => {
+            obj.insert("status".into(), json!("skippedResume"));
+        }
+        OpResult::Noop => {
+            obj.insert("status".into(), json!("noop"));
+        }
+        OpResult::Failed(e) => {
+            obj.insert("status".into(), json!("failed"));
+            obj.insert("error".into(), json!(e.to_string()));
+            obj.insert("errorKind".into(), json!(kind_code(e.kind())));
+        }
     }
-    v
+    Value::Object(obj)
 }
 
 /// `sha256:` digest over the plan set, `generatedAt` stripped — the
 /// preview → apply re-plan must produce identical digests when
 /// nothing changed, and timestamps always differ.
-fn plans_digest(plans: &[&Plan]) -> Result<String, String> {
-    let mut value =
-        serde_json::to_value(plans).map_err(|e| format!("cannot serialize plans: {e}"))?;
-    if let Some(plans) = value.as_array_mut() {
-        for plan in plans {
-            if let Some(obj) = plan.as_object_mut() {
-                obj.remove("generatedAt");
-            }
-        }
+fn plans_digest(plans: &[&Plan]) -> String {
+    // `Plan` serializes infallibly (string-keyed fields only); a
+    // hypothetical failure digests the empty value, which is still a
+    // stable, comparable token.
+    let mut value = serde_json::to_value(plans).unwrap_or_default();
+    for plan in value.as_array_mut().into_iter().flatten() {
+        plan.as_object_mut().map(|obj| obj.remove("generatedAt"));
     }
-    let bytes = serde_json::to_vec(&value).map_err(|e| format!("cannot hash plans: {e}"))?;
+    let bytes = serde_json::to_vec(&value).unwrap_or_default();
     let hash = Sha256::digest(&bytes);
     let hex = hash.iter().fold(String::new(), |mut s, b| {
         let _ = write!(s, "{b:02x}");
         s
     });
-    Ok(format!("sha256:{hex}"))
+    format!("sha256:{hex}")
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use cicada_core::application::OpOutcome;
+    use cicada_core::domain::drift::DriftKind;
+
+    use super::*;
+    use crate::ctx::ServerOptions;
+
+    fn test_session() -> (tempfile::TempDir, Session) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("calendars")).unwrap();
+        std::fs::write(
+            dir.path().join("cicada.yaml"),
+            "apiVersion: cicada/v1\nkind: Manifest\ncalendars: [calendars/work.yaml]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("calendars/work.yaml"),
+            "apiVersion: cicada/v1\nkind: Calendar\nmetadata: {name: work, timeZone: UTC}\nspec: {events: []}\n",
+        )
+        .unwrap();
+        let session = Session::open(&ServerOptions {
+            root: Some(dir.path().to_path_buf()),
+            provider: None,
+            fake_file: None,
+            state: None,
+        })
+        .unwrap();
+        (dir, session)
+    }
+
+    fn outcome(result: OpResult) -> OpOutcome {
+        OpOutcome {
+            op: OpKind::Create,
+            local_id: "a".into(),
+            key: "k".into(),
+            result,
+        }
+    }
+
+    #[test]
+    fn kind_code_maps_every_class() {
+        for (kind, want) in [
+            (ErrorKind::Transient, "transient"),
+            (ErrorKind::Conflict, "conflict"),
+            (ErrorKind::Auth, "auth"),
+            (ErrorKind::Fatal, "fatal"),
+        ] {
+            assert_eq!(kind_code(kind), want);
+        }
+    }
+
+    #[test]
+    fn outcome_json_renders_every_result_shape() {
+        let applied = outcome_json(&outcome(OpResult::Applied {
+            remote_id: Some("r1".into()),
+        }));
+        assert_eq!(applied["status"], "applied");
+        assert_eq!(applied["remoteId"], "r1");
+        let adopted = outcome_json(&outcome(OpResult::AlreadyApplied {
+            remote_id: Some("r2".into()),
+        }));
+        assert_eq!(adopted["status"], "alreadyApplied");
+        assert_eq!(adopted["remoteId"], "r2");
+        let adopted_no_id = outcome_json(&outcome(OpResult::AlreadyApplied { remote_id: None }));
+        assert_eq!(adopted_no_id["status"], "alreadyApplied");
+        assert!(adopted_no_id.get("remoteId").is_none());
+        let resumed = outcome_json(&outcome(OpResult::SkippedResume));
+        assert_eq!(resumed["status"], "skippedResume");
+        let noop = outcome_json(&outcome(OpResult::Noop));
+        assert_eq!(noop["status"], "noop");
+        let failed = outcome_json(&outcome(OpResult::Failed(CicadaError::auth("denied"))));
+        assert_eq!(failed["status"], "failed");
+        assert_eq!(failed["errorKind"], "auth");
+    }
+
+    #[test]
+    fn drift_summary_empty_and_entries() {
+        assert_eq!(drift_summary(&[]), "no drift");
+        let entries = vec![
+            DriftEntry::new("a".into(), "r1".into(), DriftKind::Missing),
+            DriftEntry::new(
+                "b".into(),
+                "r2".into(),
+                DriftKind::Modified {
+                    recorded_hash: "sha256:x".into(),
+                    live_hash: None,
+                },
+            ),
+        ];
+        let s = drift_summary(&entries);
+        assert!(s.contains("2 drifted"), "{s}");
+        assert!(s.contains("a missing") && s.contains("b modified"), "{s}");
+    }
+
+    #[test]
+    fn plans_digest_is_stable_and_strips_generated_at() {
+        let p1 = Plan::new("work", "2026-01-01T00:00:00Z".parse().unwrap());
+        let p2 = Plan::new("work", "2026-06-06T00:00:00Z".parse().unwrap());
+        let d = plans_digest(&[&p1]);
+        assert!(d.starts_with("sha256:"));
+        // generatedAt is stripped — same ops, different timestamp.
+        assert_eq!(d, plans_digest(&[&p2]));
+    }
+
+    #[test]
+    fn remote_for_recorded_binds_in_order() {
+        let (_dir, session) = test_session();
+        let calendars = session.calendars().unwrap();
+        // Declared calendar → the declared binding.
+        let recorded = RecordedCalendar::default();
+        let remote = remote_for_recorded(&session, &calendars, "work", &recorded);
+        assert_eq!(remote.as_str(), "primary");
+        // Unknown recorded calendar, empty id → "primary" fallback.
+        let remote = remote_for_recorded(&session, &calendars, "ghost", &recorded);
+        assert_eq!(remote.as_str(), "primary");
+        // …and a recorded binding survives.
+        let recorded = RecordedCalendar {
+            calendar_id: "other-cal".into(),
+            ..RecordedCalendar::default()
+        };
+        let remote = remote_for_recorded(&session, &calendars, "ghost", &recorded);
+        assert_eq!(remote.as_str(), "other-cal");
+    }
 }

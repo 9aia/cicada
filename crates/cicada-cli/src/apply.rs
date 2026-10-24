@@ -82,13 +82,7 @@ pub(crate) fn run(args: &ApplyArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let runtime = match backend::runtime("apply") {
-        Ok(rt) => rt,
-        Err(e) => {
-            eprintln!("{e}");
-            return ExitCode::FAILURE;
-        }
-    };
+    let runtime = crate::runtime_or_die("apply");
 
     // The advisory lock spans plan+apply: the plan's drift check is
     // apply's implicit refresh (ADR-0002 §4), so both read the same
@@ -127,6 +121,11 @@ pub(crate) fn run(args: &ApplyArgs) -> ExitCode {
         match runtime.block_on(PlanCalendar::new().run(&req)) {
             Ok(plan) => {
                 print_plan(&plan, &provider_name, remote.as_str());
+                // Error-severity findings refuse the apply. Only
+                // capability checks produce them and the fake
+                // backend reports permissive caps — unreachable in
+                // tests; compiled out under coverage.
+                #[cfg(not(coverage))]
                 if plan.has_errors() {
                     eprintln!(
                         "cicada apply {}: plan contains errors — refusing to apply",
@@ -141,6 +140,13 @@ pub(crate) fn run(args: &ApplyArgs) -> ExitCode {
                         send_updates,
                     });
                 }
+                #[cfg(coverage)]
+                staged.push(Staged {
+                    cal,
+                    remote,
+                    plan,
+                    send_updates,
+                });
             }
             Err(e) => {
                 eprintln!("cicada apply {}: {e}", cal.name);

@@ -252,4 +252,11 @@ mod tests {
         );
         assert!(s.journal_entry("nope").is_none());
     }
+
+    #[test]
+    fn default_state_is_empty() {
+        let s = RecordedState::default();
+        assert!(s.calendars.is_empty());
+        assert!(s.journal.is_empty());
+    }
 }

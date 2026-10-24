@@ -437,4 +437,54 @@ mod tests {
         let v = serde_json::to_value(&op).unwrap();
         assert_eq!(v["conflict"]["kind"], "missing");
     }
+
+    #[test]
+    fn set_conflict_covers_every_variant() {
+        let desired = || Box::new(event("x"));
+        let mut ops = vec![
+            Operation::Create {
+                desired: desired(),
+                hash: hash("c"),
+                conflict: None,
+            },
+            Operation::Update {
+                local_id: "x".into(),
+                remote_id: "r".into(),
+                desired: desired(),
+                diff: EventDiff::default(),
+                hash: hash("u"),
+                etag: None,
+                conflict: None,
+            },
+            Operation::Delete {
+                local_id: "x".into(),
+                remote_id: "r".into(),
+                hash: hash("d"),
+                etag: None,
+                conflict: None,
+            },
+            Operation::Replace {
+                local_id: "x".into(),
+                remote_id: "r".into(),
+                desired: desired(),
+                diff: EventDiff::default(),
+                hash: hash("rp"),
+                etag: None,
+                conflict: None,
+            },
+            Operation::NoOp {
+                local_id: "x".into(),
+                remote_id: "r".into(),
+                hash: hash("n"),
+                conflict: None,
+            },
+        ];
+        for op in &mut ops {
+            op.set_conflict(crate::domain::drift::DriftKind::Missing);
+            assert_eq!(
+                op.conflict(),
+                Some(&crate::domain::drift::DriftKind::Missing)
+            );
+        }
+    }
 }

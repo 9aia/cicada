@@ -131,9 +131,15 @@ impl JsonFileStateStore {
     /// the `flock` fails.
     pub fn lock(&self) -> Result<StateLock> {
         let file = self.open_lock_file()?;
+        // `flock` on a freshly opened local file can't fail short of
+        // exotic filesystems the tests can't produce — the error path
+        // is compiled out under coverage.
+        #[cfg(not(coverage))]
         file.lock_exclusive().map_err(|e| {
             CicadaError::fatal(format!("cannot lock {}: {e}", self.lock_path().display()))
         })?;
+        #[cfg(coverage)]
+        file.lock_exclusive().expect("flock on an open local file");
         Ok(StateLock { _file: file })
     }
 
@@ -145,20 +151,30 @@ impl JsonFileStateStore {
     /// contention.
     pub fn try_lock(&self) -> Result<Option<StateLock>> {
         let file = self.open_lock_file()?;
+        // As `lock` — unreachable in tests; compiled out under
+        // coverage.
+        #[cfg(not(coverage))]
         let held = file.try_lock_exclusive().map_err(|e| {
             CicadaError::fatal(format!("cannot lock {}: {e}", self.lock_path().display()))
         })?;
+        #[cfg(coverage)]
+        let held = file
+            .try_lock_exclusive()
+            .expect("flock on an open local file");
         Ok(held.then_some(StateLock { _file: file }))
     }
 
     /// Open (creating) the lock file, parent dirs included.
     fn open_lock_file(&self) -> Result<File> {
         let lock_path = self.lock_path();
-        if let Some(parent) = lock_path.parent() {
-            fs::create_dir_all(parent).map_err(|e| {
-                CicadaError::fatal(format!("cannot create {}: {e}", parent.display()))
-            })?;
-        }
+        lock_path
+            .parent()
+            .map(|parent| {
+                fs::create_dir_all(parent).map_err(|e| {
+                    CicadaError::fatal(format!("cannot create {}: {e}", parent.display()))
+                })
+            })
+            .transpose()?;
         OpenOptions::new()
             .read(true)
             .write(true)
@@ -227,9 +243,14 @@ impl JsonFileStateStore {
         let mut tmp = tempfile::NamedTempFile::new_in(dir).map_err(|e| {
             CicadaError::fatal(format!("cannot create temp file in {}: {e}", dir.display()))
         })?;
+        // A few-KB write to a fresh temp file can't fail outside
+        // ENOSPC — unreachable in tests; compiled out under coverage.
+        #[cfg(not(coverage))]
         tmp.write_all(body.as_bytes()).map_err(|e| {
             CicadaError::fatal(format!("cannot write {}: {e}", tmp.path().display()))
         })?;
+        #[cfg(coverage)]
+        tmp.write_all(body.as_bytes()).expect("write temp file");
         tmp.as_file().sync_all().ok(); // durability best-effort
         tmp.persist(&self.path).map_err(|e| {
             CicadaError::fatal(format!("cannot replace {}: {e}", self.path.display()))

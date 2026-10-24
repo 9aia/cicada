@@ -237,6 +237,22 @@ impl GoogleCalendarProvider {
             .await
     }
 
+    /// `send` where absence is impossible — under `Fatal`/`Conflict`
+    /// policies `send` never yields `None`, so the fallback is
+    /// defensive only (a 404 reaches here as an `Err` already).
+    async fn send_some(&self, req: HttpRequest, gone: Gone) -> Result<HttpResponse> {
+        self.send(req, gone)
+            .await?
+            .ok_or_else(|| CicadaError::fatal("google api unexpectedly absent"))
+    }
+
+    /// [`send_some`] for `GET`s.
+    async fn get_some(&self, url: Url, gone: Gone) -> Result<HttpResponse> {
+        self.get(url, gone)
+            .await?
+            .ok_or_else(|| CicadaError::fatal("google api unexpectedly absent"))
+    }
+
     /// Parse one `WireEvent` response body.
     fn parse_event(resp: &HttpResponse) -> Result<RemoteEvent> {
         let wire: WireEvent = serde_json::from_slice(&resp.body)
@@ -272,9 +288,7 @@ impl GoogleCalendarProvider {
                     q.append_pair("pageToken", token);
                 }
             }
-            let Some(resp) = self.get(page_url, Gone::Fatal).await? else {
-                continue;
-            };
+            let resp = self.get_some(page_url, Gone::Fatal).await?;
             let page: EventListPage = serde_json::from_slice(&resp.body).map_err(|e| {
                 CicadaError::fatal(format!("malformed google events.list payload: {e}"))
             })?;
@@ -425,10 +439,7 @@ impl CalendarProvider for GoogleCalendarProvider {
             }
         }
         let req = HttpRequest::new(HttpMethod::Post, String::from(url)).json(&wire)?;
-        let resp = self
-            .send(req, Gone::Fatal)
-            .await?
-            .ok_or_else(|| CicadaError::fatal("create unexpectedly absent"))?;
+        let resp = self.send_some(req, Gone::Fatal).await?;
         Self::parse_event(&resp)
     }
 
@@ -444,19 +455,9 @@ impl CalendarProvider for GoogleCalendarProvider {
         // ours, and an existing conferenceData means we must not send
         // another createRequest.
         let get_url = self.events_url(calendar, Some(remote_id))?;
-        let existing: Option<WireEvent> = self
-            .get(get_url, Gone::Conflict)
-            .await?
-            .map(|resp| {
-                serde_json::from_slice(&resp.body)
-                    .map_err(|e| CicadaError::fatal(format!("malformed google event payload: {e}")))
-            })
-            .transpose()?;
-        let existing = existing.ok_or_else(|| {
-            CicadaError::conflict(format!(
-                "remote event {remote_id} is gone — refresh and re-plan"
-            ))
-        })?;
+        let resp = self.get_some(get_url, Gone::Conflict).await?;
+        let existing: WireEvent = serde_json::from_slice(&resp.body)
+            .map_err(|e| CicadaError::fatal(format!("malformed google event payload: {e}")))?;
         let remote_tags = event_json::from_wire(&existing)
             .map(|e| e.tags)
             .unwrap_or_default();
@@ -491,10 +492,7 @@ impl CalendarProvider for GoogleCalendarProvider {
         if let Some(etag) = &opts.etag {
             req.headers.push(("if-match".to_owned(), etag.clone()));
         }
-        let resp = self
-            .send(req, Gone::Conflict)
-            .await?
-            .ok_or_else(|| CicadaError::conflict(format!("remote event {remote_id} is gone")))?;
+        let resp = self.send_some(req, Gone::Conflict).await?;
         Self::parse_event(&resp)
     }
 
@@ -528,10 +526,7 @@ impl CalendarProvider for GoogleCalendarProvider {
             "items": [{ "id": calendar.as_str() }],
         });
         let req = HttpRequest::new(HttpMethod::Post, String::from(url)).json(&body)?;
-        let resp = self
-            .send(req, Gone::Fatal)
-            .await?
-            .ok_or_else(|| CicadaError::fatal("freeBusy unexpectedly absent"))?;
+        let resp = self.send_some(req, Gone::Fatal).await?;
         let parsed: FreeBusyResponse = serde_json::from_slice(&resp.body)
             .map_err(|e| CicadaError::fatal(format!("malformed google freeBusy payload: {e}")))?;
         let Some(cal) = parsed.calendars.get(calendar.as_str()) else {

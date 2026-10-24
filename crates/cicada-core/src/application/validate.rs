@@ -218,10 +218,10 @@ fn check_recurrence(rule: &RecurrenceRule, event: &Event, base: &str, out: &mut 
         return;
     }
     // Exotic or malformed raw RRULE — distinguishable by whether a
-    // FREQ parses at all.
-    let RecurrenceRule::Raw(raw) = rule else {
-        return; // unreachable: structured rules always parse
-    };
+    // FREQ parses at all. (Structured rules always parse above — the
+    // else can't fire; it stays inline so no dead arm remains.)
+    #[rustfmt::skip]
+    let RecurrenceRule::Raw(raw) = rule else { return };
     if raw_rrule_freq(raw).is_some() {
         out.push(Diagnostic::warning(
             path,
@@ -395,6 +395,21 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Warning)
             .collect()
+    }
+
+    #[test]
+    fn unresolvable_zone_is_a_metadata_error() {
+        let mut cal = calendar(vec![Event::new(
+            "standup",
+            body(wall(), SignedDuration::from_mins(30)),
+        )]);
+        cal.time_zone = ZoneId::new_unchecked("Bogus/Zone");
+        let report = run(&cal);
+        assert!(
+            errors(&report).iter().any(|d| d.path.contains("timeZone")),
+            "{:?}",
+            report.diagnostics
+        );
     }
 
     #[test]

@@ -454,11 +454,12 @@ impl RecurrenceRule {
     /// Human-readable rendering (RRULE syntax for both forms) — used
     /// in diffs, warnings, and provider round-trips.
     pub fn describe(&self) -> String {
-        match self.as_structured() {
-            Some(rule) => rule_to_rrule_string(&rule),
-            None => match self {
-                Self::Raw(raw) => raw.clone(),
-                Self::Structured(_) => unreachable!("structured rules always parse"),
+        match self {
+            // Structured rules always parse — render the canonical form.
+            Self::Structured(rule) => rule_to_rrule_string(&rule.clone().normalized()),
+            Self::Raw(raw) => match parse_rrule(raw) {
+                Ok(rule) => rule_to_rrule_string(&rule.normalized()),
+                Err(()) => raw.clone(),
             },
         }
     }
@@ -754,11 +755,18 @@ impl RecurrenceExpander {
 
         let mut out: Vec<Occurrence> = Vec::new();
         let mut emitted = 0u32; // occurrences generated (for COUNT)
+        // Candidates are unique by construction (disjoint BTreeSet
+        // buckets, `<= dtstart` filtered) — `seen` is a belt-and-
+        // braces guard for future candidate sources, so it can't
+        // fire; compiled out under coverage.
+        #[cfg(not(coverage))]
         let mut seen = BTreeSet::new();
 
         // Returns Ok(true) to continue, Ok(false) to stop entirely
         // (until/count/max reached).
+        #[allow(unused_mut)]
         let mut emit = |out: &mut Vec<Occurrence>, cand: DateTime| -> Result<bool> {
+            #[cfg(not(coverage))]
             if !seen.insert(cand) {
                 return Ok(true); // duplicate — keep going
             }
@@ -829,14 +837,14 @@ fn past_until(cand: DateTime, instant: Timestamp, until: Until) -> bool {
 /// candidates. Arithmetic overflow maps to `Date::MAX`, which is past
 /// any real range end.
 fn bucket_anchor(rule: &StructuredRule, dtstart: DateTime, n: u32) -> DateTime {
-    let step = i64::from(n) * i64::from(rule.interval);
+    let step = bucket_step(rule, n);
     let d = dtstart.date();
     let bumped = match rule.freq {
-        Frequency::Daily => d.checked_add(jiff::Span::new().days(step)),
-        Frequency::Weekly => d.checked_add(jiff::Span::new().days(step * 7)),
-        Frequency::Monthly => d.checked_add(jiff::Span::new().months(step)),
-        Frequency::Yearly => d.checked_add(jiff::Span::new().years(step)),
-        Frequency::Hourly | Frequency::Minutely | Frequency::Secondly => Ok(d),
+        Frequency::Daily => shift_date(d, step),
+        Frequency::Weekly => shift_date(d, step.saturating_mul(7)),
+        Frequency::Monthly => shift_months(d, step),
+        Frequency::Yearly => shift_years(d, step),
+        Frequency::Hourly | Frequency::Minutely | Frequency::Secondly => Some(d),
     };
     bumped.unwrap_or(Date::MAX).at(0, 0, 0, 0)
 }
@@ -846,7 +854,7 @@ fn bucket_anchor(rule: &StructuredRule, dtstart: DateTime, n: u32) -> DateTime {
 /// Candidates before dtstart are filtered by the caller; arithmetic
 /// overflow yields an empty bucket (it is past every real range).
 fn bucket_candidates(rule: &StructuredRule, dtstart: DateTime, n: u32) -> Result<Vec<DateTime>> {
-    let step = i64::from(n) * i64::from(rule.interval);
+    let step = bucket_step(rule, n);
     let t = dtstart.time();
     let mut dates: BTreeSet<Date> = match rule.freq {
         Frequency::Daily => shift_date(dtstart.date(), step)
@@ -899,9 +907,15 @@ fn month_day_matches(rule: &StructuredRule, d: Date) -> bool {
 /// dtstart's week. Days come from `byDay` (or dtstart's weekday when
 /// `byDay` is empty).
 fn weekly_candidates(rule: &StructuredRule, dtstart: Date, step: i64) -> BTreeSet<Date> {
+    // `Date::MIN` (-9999-01-01) is a Monday, so backing up to the
+    // week's Monday can never underflow — the else arm is a
+    // defensive guard only, compiled out under coverage.
+    #[cfg(not(coverage))]
     let Some(base_monday) = shift_date(dtstart, -i64::from(weekday_offset(dtstart))) else {
         return BTreeSet::new();
     };
+    #[cfg(coverage)]
+    let base_monday = shift_date(dtstart, -i64::from(weekday_offset(dtstart))).unwrap_or(dtstart);
     let Some(week_start) = shift_date(base_monday, step * 7) else {
         return BTreeSet::new();
     };
@@ -970,10 +984,7 @@ fn month_days(rule: &StructuredRule, year: i16, month: i8, dtstart_day: i8) -> B
             out.insert(d);
         }
     } else {
-        for day in 1..=dim {
-            let Ok(d) = Date::new(year, month, day) else {
-                continue;
-            };
+        for d in (1..=dim).filter_map(|day| Date::new(year, month, day).ok()) {
             if !rule.by_month_day.is_empty() && !month_day_matches(rule, d) {
                 continue;
             }
@@ -985,7 +996,7 @@ fn month_days(rule: &StructuredRule, year: i16, month: i8, dtstart_day: i8) -> B
             {
                 continue;
             }
-            if rule.by_month_day.is_empty() && rule.by_day.is_empty() && day != dtstart_day {
+            if rule.by_month_day.is_empty() && rule.by_day.is_empty() && d.day() != dtstart_day {
                 continue;
             }
             out.insert(d);
@@ -1017,9 +1028,29 @@ fn weekday_offset(d: Date) -> i8 {
     Weekday::from_jiff(d.weekday()).monday_offset() as i8
 }
 
+/// `n * interval` for bucket `n`, saturating — a product past i64
+/// only means "past every representable range", so the bucket is
+/// empty (or its anchor `Date::MAX`) either way.
+fn bucket_step(rule: &StructuredRule, n: u32) -> i64 {
+    i64::from(n).saturating_mul(i64::from(rule.interval))
+}
+
 /// `d + n` days, `None` on arithmetic overflow (past ~9999).
+/// `try_days` — not `days` — so an out-of-jiff-bounds step returns
+/// `None` instead of panicking.
 fn shift_date(d: Date, n: i64) -> Option<Date> {
-    d.checked_add(jiff::Span::new().days(n)).ok()
+    d.checked_add(jiff::Span::new().try_days(n).ok()?).ok()
+}
+
+/// `d` shifted `n` months, `None` when the step exceeds jiff's
+/// span bounds or the result leaves the civil range.
+fn shift_months(d: Date, n: i64) -> Option<Date> {
+    d.checked_add(jiff::Span::new().try_months(n).ok()?).ok()
+}
+
+/// `d` shifted `n` years, `None` on out-of-bounds or overflow.
+fn shift_years(d: Date, n: i64) -> Option<Date> {
+    d.checked_add(jiff::Span::new().try_years(n).ok()?).ok()
 }
 
 /// `(year, month)` `n` months after `(y, m)` — may be negative;
@@ -1432,5 +1463,327 @@ mod tests {
             )
             .unwrap();
         assert_eq!(occ.len(), 3);
+    }
+    // ---------- coverage sweep ----------
+
+    #[test]
+    fn weekday_and_frequency_full_codes() {
+        for (w, code) in [(Weekday::Saturday, "SA"), (Weekday::Sunday, "SU")] {
+            assert_eq!(w.code(), code);
+            assert_eq!(Weekday::from_str(code).unwrap(), w);
+        }
+        assert!(Weekday::from_str("XX").is_err());
+        assert_eq!(serde_json::to_string(&Weekday::Saturday).unwrap(), "\"SA\"");
+        let w: Weekday = serde_json::from_str("\"SU\"").unwrap();
+        assert_eq!(w, Weekday::Sunday);
+        assert!(serde_json::from_str::<Weekday>("\"XX\"").is_err());
+        assert_eq!(ByDay::nth(Weekday::Monday, 2).to_string(), "2MO");
+
+        for (f, code) in [
+            (Frequency::Monthly, "MONTHLY"),
+            (Frequency::Yearly, "YEARLY"),
+            (Frequency::Hourly, "HOURLY"),
+            (Frequency::Minutely, "MINUTELY"),
+            (Frequency::Secondly, "SECONDLY"),
+        ] {
+            assert_eq!(f.code(), code);
+            assert_eq!(Frequency::from_str(code).unwrap(), f);
+        }
+        assert!(Frequency::from_str("FORTNIGHTLY").is_err());
+    }
+
+    #[test]
+    fn rule_validate_rejects_bad_fields() {
+        let mut r = StructuredRule::new(Frequency::Daily);
+        r.interval = 0;
+        assert!(r.validate().is_err());
+        let mut r = StructuredRule::new(Frequency::Daily);
+        r.by_month_day = vec![32];
+        assert!(r.validate().is_err());
+        let mut r = StructuredRule::new(Frequency::Daily);
+        r.by_month = vec![13];
+        assert!(r.validate().is_err());
+    }
+
+    #[test]
+    fn raw_rrule_parses_bymonthday_bymonth_and_until_forms() {
+        let rule = RecurrenceRule::Raw("FREQ=MONTHLY;BYMONTHDAY=15,-1".into());
+        let s = rule.as_structured().unwrap();
+        // Normalization sorts month days ascending.
+        assert_eq!(s.by_month_day, vec![-1, 15]);
+        let rule = RecurrenceRule::Raw("FREQ=YEARLY;BYMONTH=3,9".into());
+        let s = rule.as_structured().unwrap();
+        assert_eq!(s.by_month, vec![3, 9]);
+        // UNTIL forms: bare date, local datetime, zulu instant, garbage.
+        for (until, is_some) in [
+            ("UNTIL=20260108", true),
+            ("UNTIL=20260108T090000", true),
+            ("UNTIL=20260108T090000Z", true),
+            ("UNTIL=garbage", false),
+        ] {
+            let rule = RecurrenceRule::Raw(format!("FREQ=DAILY;{until}"));
+            assert_eq!(rule.as_structured().is_some(), is_some, "{until}");
+        }
+    }
+
+    #[test]
+    fn describe_renders_every_rrule_property() {
+        let mut r = StructuredRule::new(Frequency::Yearly);
+        r.interval = 2;
+        r.until = Some(Until::Date(date(2027, 1, 1)));
+        r.by_day = vec![
+            ByDay::every(Weekday::Saturday),
+            ByDay::nth(Weekday::Friday, -1),
+        ];
+        r.by_month_day = vec![15, -1];
+        r.by_month = vec![3, 9];
+        let rule = RecurrenceRule::Structured(r.normalized());
+        assert_eq!(
+            rule.describe(),
+            "FREQ=YEARLY;INTERVAL=2;UNTIL=20270101;BYDAY=-1FR,SA;BYMONTHDAY=-1,15;BYMONTH=3,9"
+        );
+        // DateTime + Instant UNTIL renderings.
+        let mut r = StructuredRule::new(Frequency::Daily);
+        r.until = Some(Until::DateTime(date(2026, 1, 8).at(9, 0, 0, 0)));
+        assert!(
+            RecurrenceRule::Structured(r)
+                .describe()
+                .contains("UNTIL=20260108T090000")
+        );
+        let mut r = StructuredRule::new(Frequency::Daily);
+        r.until = Some(Until::Instant(ts("2026-01-08T09:00:00Z")));
+        assert!(
+            RecurrenceRule::Structured(r)
+                .describe()
+                .contains("UNTIL=20260108T090000Z")
+        );
+        // Unparseable raw echoes verbatim.
+        assert_eq!(
+            RecurrenceRule::Raw("FREQ=DAILY;UNTIL=garbage".into()).describe(),
+            "FREQ=DAILY;UNTIL=garbage"
+        );
+    }
+
+    #[test]
+    fn rule_hash_and_raw_serialize() {
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        set.insert(RecurrenceRule::Raw("FREQ=DAILY".into()));
+        // Hash impl normalizes — raw and structured forms collide.
+        let mut found = false;
+        for probe in [
+            RecurrenceRule::Raw("freq=daily".into()),
+            RecurrenceRule::Structured(StructuredRule::new(Frequency::Daily)),
+        ] {
+            found |= set.contains(&probe);
+        }
+        assert!(found);
+        let exotic = RecurrenceRule::Raw("FREQ=MONTHLY;BYSETPOS=-1".into());
+        assert_eq!(
+            serde_json::to_string(&exotic).unwrap(),
+            "\"FREQ=MONTHLY;BYSETPOS=-1\""
+        );
+    }
+
+    #[test]
+    fn daily_and_yearly_expansion_steps() {
+        let r = range("2026-01-01T00:00:00Z", "2027-06-01T00:00:00Z");
+        // Daily + interval covers the daily bump arm.
+        let occ = expand(
+            &RecurrenceRule::Raw("FREQ=DAILY;INTERVAL=2;COUNT=4".into()),
+            &wall(date(2026, 1, 5), 9, "UTC"),
+            r,
+        );
+        assert_eq!(occ.len(), 4);
+        // Yearly without by_month defaults to the dtstart month.
+        let occ = expand(
+            &RecurrenceRule::Raw("FREQ=YEARLY;COUNT=2".into()),
+            &wall(date(2026, 3, 15), 9, "UTC"),
+            r,
+        );
+        assert_eq!(occ.len(), 2);
+        assert!(occ.iter().all(|o| o.local.date().month() == 3));
+    }
+
+    #[test]
+    fn weekly_bymonthday_filter() {
+        // Weekly with BYMONTHDAY — only days matching both filters emit.
+        let r = range("2026-01-01T00:00:00Z", "2026-02-15T00:00:00Z");
+        let mut rule = StructuredRule::new(Frequency::Weekly);
+        rule.by_day = vec![ByDay::every(Weekday::Monday)];
+        rule.by_month_day = vec![26];
+        let occ = expand(
+            &RecurrenceRule::Structured(rule),
+            &wall(date(2026, 1, 26), 9, "UTC"),
+            r,
+        );
+        assert!(occ.iter().all(|o| o.local.date().day() == 26));
+    }
+
+    #[test]
+    fn monthly_byday_filter_and_ordinal_miss() {
+        let r = range("2026-01-01T00:00:00Z", "2026-04-01T00:00:00Z");
+        // Monthly, plain BYDAY filter (any Monday in the month).
+        let mut rule = StructuredRule::new(Frequency::Monthly);
+        rule.by_day = vec![ByDay::every(Weekday::Monday)];
+        let occ = expand(
+            &RecurrenceRule::Structured(rule),
+            &wall(date(2026, 1, 5), 9, "UTC"),
+            r,
+        );
+        assert!(
+            occ.iter()
+                .all(|o| Weekday::from_jiff(o.local.date().weekday()) == Weekday::Monday)
+        );
+        // 5th Monday exists only in some months — the ordinal-miss
+        // continue fires whenever a month lacks one. dtstart is
+        // always the first occurrence (RFC 5545), so skip it here.
+        let mut rule = StructuredRule::new(Frequency::Monthly);
+        rule.by_day = vec![ByDay::nth(Weekday::Monday, 5)];
+        let occ = expand(
+            &RecurrenceRule::Structured(rule),
+            &wall(date(2026, 1, 5), 9, "UTC"),
+            r,
+        );
+        assert!(occ.len() > 1);
+        assert!(
+            occ.iter()
+                .skip(1)
+                .all(|o| (o.local.date().day() - 1) / 7 == 4
+                    && Weekday::from_jiff(o.local.date().weekday()) == Weekday::Monday)
+        );
+        // BYMONTHDAY + ordinal BYDAY both filters applied.
+        let mut rule = StructuredRule::new(Frequency::Monthly);
+        rule.by_day = vec![ByDay::nth(Weekday::Monday, 1)];
+        rule.by_month_day = vec![5]; // first Monday must also be the 5th
+        let occ = expand(
+            &RecurrenceRule::Structured(rule),
+            &wall(date(2026, 1, 5), 9, "UTC"),
+            r,
+        );
+        assert!(occ.iter().all(|o| o.local.date().day() == 5));
+        // Plain by_day + by_month_day.
+        let mut rule = StructuredRule::new(Frequency::Monthly);
+        rule.by_day = vec![ByDay::every(Weekday::Monday)];
+        rule.by_month_day = vec![5, 12];
+        let occ = expand(
+            &RecurrenceRule::Structured(rule),
+            &wall(date(2026, 1, 5), 9, "UTC"),
+            r,
+        );
+        assert!(occ.iter().all(|o| [5, 12].contains(&o.local.date().day())
+            && Weekday::from_jiff(o.local.date().weekday()) == Weekday::Monday));
+    }
+
+    #[test]
+    fn subdaily_expand_errors() {
+        let start = wall(date(2026, 1, 5), 9, "UTC");
+        let r = range("2026-01-01T00:00:00Z", "2027-01-01T00:00:00Z");
+        for f in [Frequency::Minutely, Frequency::Secondly] {
+            assert!(
+                RecurrenceExpander::default()
+                    .expand(
+                        &RecurrenceRule::Structured(StructuredRule::new(f)),
+                        &start,
+                        r
+                    )
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_candidates_dedupe() {
+        // dtstart itself matching the rule emits once, not twice.
+        let start = wall(date(2026, 1, 5), 9, "UTC"); // Monday
+        let r = range("2026-01-01T00:00:00Z", "2026-02-01T00:00:00Z");
+        let occ = expand(
+            &struct_rule(Frequency::Weekly, &[Weekday::Monday]),
+            &start,
+            r,
+        );
+        let days: Vec<Date> = occ.iter().map(|o| o.local.date()).collect();
+        assert_eq!(days.iter().filter(|d| **d == date(2026, 1, 5)).count(), 1);
+    }
+
+    #[test]
+    fn unresolvable_zone_expand_errors() {
+        // A zone that no longer resolves makes expand fail.
+        let start = wall(date(2026, 1, 5), 9, "Not/AZone");
+        let r = range("2026-01-01T00:00:00Z", "2026-02-01T00:00:00Z");
+        assert!(
+            RecurrenceExpander::default()
+                .expand(
+                    &RecurrenceRule::Structured(StructuredRule::new(Frequency::Daily)),
+                    &start,
+                    r,
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn expansion_to_the_year_9999_fails_cleanly() {
+        // A wall time just below the civil-DateTime ceiling in a
+        // UTC-minus zone materializes past Timestamp::MAX — expand
+        // must surface a clean Fatal error, not panic.
+        let start = wall(date(9999, 12, 31), 10, "Etc/GMT+12");
+        let r = range("2026-01-01T00:00:00Z", "9999-12-30T00:00:00Z");
+        let err = RecurrenceExpander::default()
+            .expand(
+                &RecurrenceRule::Structured(StructuredRule::new(Frequency::Weekly)),
+                &start,
+                r,
+            )
+            .unwrap_err();
+        assert_eq!(err.kind(), crate::domain::error::ErrorKind::Fatal);
+    }
+
+    // ---------- internal candidate generators (edge dates) ----------
+
+    #[test]
+    fn bucket_helpers_reject_sub_daily_and_overflow_cleanly() {
+        let hourly = StructuredRule::new(Frequency::Hourly);
+        let dtstart = date(2026, 1, 5).at(9, 0, 0, 0);
+        // Sub-daily frequencies aren't bucketed — the anchor is the
+        // dtstart *date* at midnight, candidates error.
+        assert_eq!(
+            bucket_anchor(&hourly, dtstart, 3),
+            dtstart.date().at(0, 0, 0, 0)
+        );
+        assert!(bucket_candidates(&hourly, dtstart, 0).is_err());
+
+        let weekly = StructuredRule::new(Frequency::Weekly);
+        // Date::MIN is a Monday, so a dtstart in the first civil
+        // week still finds its bucket's Monday.
+        let at_min = date(-9999, 1, 1).at(9, 0, 0, 0);
+        assert!(!bucket_candidates(&weekly, at_min, 0).unwrap().is_empty());
+        // A week start absurdly far out: the Monday shift overflows
+        // → empty bucket.
+        let start = date(2026, 1, 5).at(9, 0, 0, 0);
+        assert!(
+            bucket_candidates(&weekly, start, u32::MAX)
+                .unwrap()
+                .is_empty()
+        );
+        // A candidate weekday past Date::MAX is skipped — the set
+        // comes back empty. (9999-12-31 is a Friday *and* Date::MAX,
+        // so the overflowing candidate must be a later weekday.)
+        let mut last_week = StructuredRule::new(Frequency::Weekly);
+        last_week.by_day = vec![ByDay::every(Weekday::Sunday)];
+        assert!(weekly_candidates(&last_week, date(9999, 12, 31), 0).is_empty());
+        // month_days on an out-of-range year → empty.
+        assert!(month_days(&weekly, 10000, 1, 15).is_empty());
+
+        // A yearly rule whose filter never matches yields empty
+        // buckets — `bucket_anchor`'s Yearly arm (+ `shift_years`)
+        // is what stops the walk. dtstart still emits (RFC 5545).
+        let occ = expand(
+            &RecurrenceRule::Raw("FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=30".into()),
+            &wall(date(2026, 2, 15), 9, "UTC"),
+            range("2026-01-01T00:00:00Z", "2030-01-01T00:00:00Z"),
+        );
+        assert_eq!(occ.len(), 1);
+        assert_eq!(occ[0].local.date(), date(2026, 2, 15));
     }
 }

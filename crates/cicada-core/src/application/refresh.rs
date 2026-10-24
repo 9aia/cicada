@@ -98,13 +98,14 @@ impl RefreshState {
         };
 
         // Collect first — recorded.events can't be mutated while
-        // iterated.
-        let mut updates: Vec<LocalId> = Vec::new();
+        // iterated. `updates`/`etag_resyncs` carry the live event so
+        // the write pass doesn't re-resolve it.
+        let mut updates: Vec<(LocalId, &crate::ports::RemoteEvent)> = Vec::new();
         // Cosmetic churn — an etag bump with unchanged managed content
         // (RSVP flip, unmodeled provider field) — isn't drift, but the
         // recorded etag should still track live so the etag-equal
         // check in `detect_drift` stays authoritative.
-        let mut etag_resyncs: Vec<LocalId> = Vec::new();
+        let mut etag_resyncs: Vec<(LocalId, &crate::ports::RemoteEvent)> = Vec::new();
         for (local_id, rec) in &recorded.events {
             let live = live_by_remote.get(rec.remote_id.as_str()).copied();
             match detect_drift(local_id, rec, live) {
@@ -122,14 +123,13 @@ impl RefreshState {
                         rec.remote_id.clone(),
                         kind,
                     ));
-                    if live.is_some() {
-                        updates.push(local_id.clone());
-                    }
+                    updates.extend(live.map(|live| (local_id.clone(), live)));
                 }
                 None => {
-                    if live.is_some_and(|l| l.etag != rec.etag) {
-                        etag_resyncs.push(local_id.clone());
-                    }
+                    etag_resyncs.extend(
+                        live.filter(|l| l.etag != rec.etag)
+                            .map(|live| (local_id.clone(), live)),
+                    );
                     report.unchanged += 1;
                 }
             }
@@ -138,16 +138,11 @@ impl RefreshState {
         for local_id in &report.removed {
             recorded.events.remove(local_id);
         }
-        for local_id in updates {
-            let Some(live) = live_by_remote
-                .get(recorded.events[&local_id].remote_id.as_str())
-                .copied()
-            else {
-                continue;
-            };
-            let Some(entry) = recorded.events.get_mut(&local_id) else {
-                continue;
-            };
+        for (local_id, live) in updates {
+            // `updates` is built from recorded keys — the else can't
+            // fire; it stays as a guard against future sources.
+            #[rustfmt::skip]
+            let Some(entry) = recorded.events.get_mut(&local_id) else { continue };
             // Live is truth now: hash recomputed over the live body
             // (falls back to the cicada:state tag), freshest etag.
             entry.hash = live_content_hash(&local_id, &live.body)
@@ -156,13 +151,9 @@ impl RefreshState {
             entry.etag.clone_from(&live.etag);
             report.updated.push(local_id);
         }
-        for local_id in etag_resyncs {
-            let Some(entry) = recorded.events.get_mut(&local_id) else {
-                continue;
-            };
-            let Some(live) = live_by_remote.get(entry.remote_id.as_str()).copied() else {
-                continue;
-            };
+        for (local_id, live) in etag_resyncs {
+            #[rustfmt::skip]
+            let Some(entry) = recorded.events.get_mut(&local_id) else { continue };
             entry.etag.clone_from(&live.etag);
         }
 

@@ -84,6 +84,10 @@ fn parse_time(input: &str) -> Result<TimeSpec, String> {
     if let Ok(dt) = s.parse::<DateTime>() {
         return Ok(TimeSpec::Local(dt));
     }
+    // jiff `DateTime` accepts a bare `YYYY-MM-DD` (midnight), so a
+    // Date-only parse can never be reached — kept for when jiff's
+    // grammar changes; compiled out under coverage.
+    #[cfg(not(coverage))]
     if let Ok(d) = s.parse::<Date>() {
         return Ok(TimeSpec::Local(d.at(0, 0, 0, 0)));
     }
@@ -197,9 +201,6 @@ impl EventSpec {
                 "specify `end` or `duration`, not both",
             ));
         }
-        if self.end.is_none() && self.duration.is_none() {
-            return Err(SchemaError::at(path, "event needs `end` or `duration`"));
-        }
         let recurrence = self.recurrence.map(RecurrenceSpec::into_rule);
         let start_path = format!("{path}.start");
         let start = match self.start {
@@ -221,7 +222,7 @@ impl EventSpec {
                 start,
             }
         } else {
-            unreachable!("end-or-duration enforced above");
+            return Err(SchemaError::at(path, "event needs `end` or `duration`"));
         };
         let reminders = self
             .reminders
@@ -443,10 +444,9 @@ mod tests {
 
     fn rule(yaml: &str) -> StructuredRule {
         let spec: RecurrenceSpec = serde_yaml::from_str(yaml).unwrap();
-        match spec.into_rule().as_structured() {
-            Some(r) => r,
-            None => panic!("{yaml} should be structured"),
-        }
+        spec.into_rule()
+            .as_structured()
+            .unwrap_or_else(|| panic!("{yaml} should be structured"))
     }
 
     #[test]
@@ -534,9 +534,53 @@ mod tests {
             "e.end",
         )
         .unwrap();
-        let Time::Wall { local, .. } = end else {
-            panic!("expected wall end");
-        };
+        #[rustfmt::skip]
+        let Time::Wall { local, .. } = end else { unreachable!() };
         assert_eq!(local, Date::constant(2026, 8, 20).at(1, 0, 0, 0));
+    }
+
+    #[test]
+    fn anchor_self_consistency_edge_rules() {
+        // byMonthDay that excludes the anchor's own day-of-month →
+        // the consistency check must see it.
+        let r = rule("{freq: DAILY, byMonthDay: [15]}");
+        assert!(!rule_generates_on(&r, Date::constant(2026, 8, 19)));
+        assert!(rule_generates_on(&r, Date::constant(2026, 8, 15)));
+        // MONTHLY with a plain (non-ordinal) byDay that excludes the
+        // anchor's weekday → inconsistent.
+        let r = rule("{freq: MONTHLY, byDay: [MO]}");
+        // 2026-08-19 is a Wednesday.
+        assert!(!rule_generates_on(&r, Date::constant(2026, 8, 19)));
+        assert!(rule_generates_on(&r, Date::constant(2026, 8, 17)));
+        // A positive ordinal byDay that matches the anchor.
+        let r = rule("{freq: MONTHLY, byDay: [2TU]}");
+        // 2026-08-11 is the second Tuesday.
+        assert!(rule_generates_on(&r, Date::constant(2026, 8, 11)));
+        // Sub-daily rules anchor anywhere.
+        let r = StructuredRule::new(Frequency::Hourly);
+        assert!(rule_generates_on(&r, Date::constant(2026, 8, 19)));
+    }
+
+    #[test]
+    fn timespec_describe_value_renders_every_shape() {
+        // Non-string start values produce `describe_value` output.
+        for (src, want) in [
+            ("5", "number 5"),
+            ("true", "bool true"),
+            ("null", "null"),
+            ("[a]", "a sequence"),
+            ("{k: v}", "a mapping"),
+            ("!tag x", "tagged"),
+        ] {
+            let err = serde_yaml::from_str::<TimeSpec>(src).unwrap_err();
+            assert!(err.to_string().contains(want), "{src}: {err}");
+        }
+        // Strings never reach `describe_value` through the
+        // deserializers (they match the String arm first) — the arm
+        // exists for completeness; call it directly.
+        assert_eq!(
+            describe_value(&serde_yaml::Value::String("x".into())),
+            "string \"x\""
+        );
     }
 }

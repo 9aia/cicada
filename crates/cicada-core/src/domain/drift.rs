@@ -173,4 +173,16 @@ mod tests {
         assert_eq!(e.local_id().as_str(), "a");
         assert_eq!(e.remote_id().as_str(), "r");
     }
+
+    #[test]
+    fn kind_codes_cover_both_variants() {
+        assert_eq!(DriftKind::Missing.code(), "missing");
+        let modified = DriftKind::Modified {
+            recorded_hash: "sha256:a".into(),
+            live_hash: None,
+        };
+        assert_eq!(modified.code(), "modified");
+        assert_eq!(DriftKind::Missing.to_string(), "missing");
+        assert_eq!(modified.to_string(), "modified");
+    }
 }

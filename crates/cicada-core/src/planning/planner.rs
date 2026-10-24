@@ -448,13 +448,10 @@ mod tests {
         let plan = OperationPlanner
             .plan(&input(&cal, Some(&recorded), &live, &caps))
             .unwrap();
-        let [op] = &plan.ops[..] else {
-            panic!("one op expected");
-        };
+        let [op] = &plan.ops[..] else { unreachable!() };
         assert_eq!(op.kind(), OpKind::Update);
-        let Operation::Update { diff, etag, .. } = op else {
-            panic!("update expected");
-        };
+        #[rustfmt::skip]
+        let Operation::Update { diff, etag, .. } = op else { unreachable!() };
         assert_eq!(diff.changes.len(), 1);
         assert_eq!(diff.changes[0].field, EventField::Summary);
         assert_eq!(diff.changes[0].to.as_deref(), Some("Daily Standup"));
@@ -482,13 +479,10 @@ mod tests {
         let plan = OperationPlanner
             .plan(&input(&cal, Some(&recorded), &live, &caps))
             .unwrap();
-        let [op] = &plan.ops[..] else {
-            panic!("one op expected");
-        };
+        let [op] = &plan.ops[..] else { unreachable!() };
         assert_eq!(op.kind(), OpKind::Replace);
-        let Operation::Replace { diff, .. } = op else {
-            panic!("replace expected");
-        };
+        #[rustfmt::skip]
+        let Operation::Replace { diff, .. } = op else { unreachable!() };
         assert!(
             diff.changes
                 .iter()
@@ -509,9 +503,7 @@ mod tests {
         let plan = OperationPlanner
             .plan(&input(&cal, Some(&recorded), &live, &caps))
             .unwrap();
-        let [op] = &plan.ops[..] else {
-            panic!("one op expected");
-        };
+        let [op] = &plan.ops[..] else { unreachable!() };
         assert_eq!(op.kind(), OpKind::Delete);
         assert_eq!(op.local_id().as_str(), "old");
         assert!(op.conflict().is_none());
@@ -552,9 +544,7 @@ mod tests {
             .unwrap();
         assert_eq!(plan.drift.len(), 1);
         assert_eq!(plan.drift[0].kind(), DriftKind::Missing);
-        let [op] = &plan.ops[..] else {
-            panic!("one op expected");
-        };
+        let [op] = &plan.ops[..] else { unreachable!() };
         // desired == recorded (NoOp) but the record is stale.
         assert_eq!(op.kind(), OpKind::NoOp);
         assert_eq!(op.conflict(), Some(&DriftKind::Missing));
@@ -578,13 +568,11 @@ mod tests {
             .plan(&input(&cal, Some(&recorded), &[live], &caps))
             .unwrap();
         assert_eq!(plan.drift.len(), 1);
+        #[rustfmt::skip]
         let DriftKind::Modified {
             recorded_hash,
             live_hash,
-        } = plan.drift[0].kind()
-        else {
-            panic!("modified drift expected");
-        };
+        } = plan.drift[0].kind() else { unreachable!() };
         assert_ne!(Some(&recorded_hash), live_hash.as_ref());
         // desired == recorded → NoOp, but conflicted.
         assert_eq!(plan.ops[0].kind(), OpKind::NoOp);
@@ -825,5 +813,42 @@ mod tests {
                 .iter()
                 .any(|w| w.local_id.as_deref() == Some("standup"))
         );
+    }
+
+    #[test]
+    fn desired_change_with_live_gone_plans_replace() {
+        // Recorded hash ≠ desired hash and the live event is gone:
+        // there is nothing to diff against, so the op is a Replace
+        // carrying the empty (conservative) diff.
+        let applied = event("standup", body("Standup"));
+        let (rec, _) = record_for(&applied);
+        let mut recorded = RecordedCalendar::default();
+        recorded.events.insert("standup".into(), rec.clone());
+        let cal = calendar(vec![event("standup", body("Renamed"))]);
+        let caps = ProviderCapabilities::permissive();
+        let plan = OperationPlanner
+            .plan(&input(&cal, Some(&recorded), &[], &caps))
+            .unwrap();
+        let [op] = &plan.ops[..] else { unreachable!() };
+        assert_eq!(op.kind(), OpKind::Replace);
+        #[rustfmt::skip]
+        let Operation::Replace { diff, .. } = op else { unreachable!() };
+        assert!(diff.changes.is_empty());
+    }
+
+    #[test]
+    fn in_sync_event_detects_no_drift() {
+        // Identical recorded/live — including the no-etag pair —
+        // produces no drift entry.
+        let applied = event("standup", body("Standup"));
+        let (rec, _) = record_for(&applied);
+        let live = live_for(&applied, &rec);
+        let id = LocalId::new("standup");
+        assert!(detect_drift(&id, &rec, Some(&live)).is_none());
+        let mut rec2 = rec.clone();
+        rec2.etag = None;
+        let mut live2 = live.clone();
+        live2.etag = None;
+        assert!(detect_drift(&id, &rec2, Some(&live2)).is_none());
     }
 }

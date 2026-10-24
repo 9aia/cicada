@@ -36,3 +36,20 @@ impl Logger for ConsoleLogger {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn log_drops_below_min_level_and_renders_fields() {
+        let logger = ConsoleLogger::new();
+        // Debug < Info — dropped entirely.
+        logger.log(LogLevel::Debug, "quiet", &[]);
+        // Info with no fields — plain rendering.
+        logger.log(LogLevel::Info, "plain", &[]);
+        // Fields render as key=value pairs.
+        logger.log(LogLevel::Warn, "with fields", &[("calendar", "work")]);
+        logger.log(LogLevel::Error, "two", &[("a", "1"), ("b", "2")]);
+    }
+}

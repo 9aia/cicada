@@ -295,6 +295,7 @@ dependencies = [
  "cicada-schema",
  "cicada-testkit",
  "jiff",
+ "tempfile",
  "tokio",
 ]
 

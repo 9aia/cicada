@@ -166,4 +166,23 @@ mod tests {
         assert_eq!(back, z);
         assert!(serde_json::from_str::<ZoneId>("\"Bogus/Zone\"").is_err());
     }
+
+    #[test]
+    fn ids_deref_via_as_ref() {
+        let local = LocalId::new("standup");
+        let remote = RemoteId::new("abc123");
+        let hash = ContentHash::new("sha256:deadbeef");
+        assert_eq!(AsRef::<str>::as_ref(&local), "standup");
+        assert_eq!(AsRef::<str>::as_ref(&remote), "abc123");
+        assert_eq!(AsRef::<str>::as_ref(&hash), "sha256:deadbeef");
+        assert_eq!(ZoneId::new_unchecked("UTC").as_str(), "UTC");
+    }
+
+    #[test]
+    fn unresolved_zone_is_a_fatal_error() {
+        let z = ZoneId::new_unchecked("Not/AZone");
+        let err = z.timezone().unwrap_err();
+        assert_eq!(err.kind(), crate::domain::error::ErrorKind::Fatal);
+        assert!(err.to_string().contains("Not/AZone"));
+    }
 }

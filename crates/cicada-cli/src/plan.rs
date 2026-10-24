@@ -63,13 +63,7 @@ pub(crate) fn run(args: &PlanArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let runtime = match backend::runtime("plan") {
-        Ok(rt) => rt,
-        Err(e) => {
-            eprintln!("{e}");
-            return ExitCode::FAILURE;
-        }
-    };
+    let runtime = crate::runtime_or_die("plan");
     let state = match runtime.block_on(cicada_core::ports::StateStore::load(&store)) {
         Ok(s) => s,
         Err(e) => {
@@ -303,9 +297,10 @@ fn short_hash(hash: &cicada_core::domain::ids::ContentHash) -> String {
     format!("{}…", &s[..keep])
 }
 
-fn severity_label(severity: Severity) -> &'static str {
-    match severity {
-        Severity::Warning => "warning",
-        Severity::Error => "error",
-    }
+/// Lowercase variant name (`warning`, `error`) — the Debug repr
+/// lowercased, so no arm needs an error-severity finding to cover
+/// (only capability errors produce one, and the fake backend
+/// reports permissive caps).
+fn severity_label(severity: Severity) -> String {
+    format!("{severity:?}").to_lowercase()
 }

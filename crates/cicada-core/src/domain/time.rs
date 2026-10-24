@@ -197,10 +197,7 @@ mod tests {
     #[test]
     fn plus_keeps_wall_semantics() {
         let end = wall().plus(SignedDuration::from_mins(30)).unwrap();
-        match end {
-            Time::Wall { local, .. } => assert_eq!(local.time().hour(), 9),
-            Time::Instant(_) => panic!("wall + duration must stay wall"),
-        }
+        assert!(matches!(end, Time::Wall { local, .. } if local.time().hour() == 9));
     }
 
     #[test]
@@ -212,6 +209,29 @@ mod tests {
         assert!(!r.contains(end)); // half-open
         assert!(TimeRange::new(end, start).is_err());
         assert!(TimeRange::new(start, start).is_err());
+    }
+
+    #[test]
+    fn instant_zones_into_utc() {
+        let ts = Timestamp::from_second(0).unwrap();
+        let zoned = Time::Instant(ts).to_zoned().unwrap();
+        assert_eq!(zoned.timestamp(), ts);
+        assert_eq!(*zoned.time_zone(), jiff::tz::TimeZone::UTC);
+    }
+
+    #[test]
+    fn wall_zoned_fails_when_zone_is_gone() {
+        let t = Time::Wall {
+            local: date(2026, 1, 5).at(9, 0, 0, 0),
+            zone: crate::domain::ids::ZoneId::new_unchecked("Not/AZone"),
+        };
+        let err = t.to_zoned().unwrap_err();
+        assert!(err.to_string().contains("no longer resolves"));
+    }
+
+    #[test]
+    fn wall_plus_overflow_is_an_error() {
+        assert!(wall().plus(SignedDuration::MAX).is_err());
     }
 
     #[test]
@@ -245,5 +265,28 @@ mod tests {
                 "wall": { "local": "2026-10-20T09:00:00", "zone": "America/Sao_Paulo" }
             })
         );
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod edge_tests {
+    use jiff::civil::date;
+
+    use super::*;
+    use crate::domain::ids::ZoneId;
+
+    #[test]
+    fn wall_time_past_timestamp_max_fails_to_materialize() {
+        // 9999-12-31T23:00 in a UTC-minus zone is a valid civil time
+        // but its instant exceeds Timestamp::MAX — to_zoned must
+        // surface a clean error rather than panic. (DST gaps do NOT
+        // error: jiff disambiguates them per the to_zoned docs.)
+        let t = Time::Wall {
+            local: date(9999, 12, 31).at(23, 0, 0, 0),
+            zone: ZoneId::new("Etc/GMT+12").unwrap(),
+        };
+        assert!(t.to_zoned().is_err());
+        assert!(t.to_timestamp().is_err());
     }
 }

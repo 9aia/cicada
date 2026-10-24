@@ -67,3 +67,23 @@ pub struct WriteOptions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub etag: Option<String>,
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_accepts_every_spelling() {
+        assert_eq!(SendUpdates::parse("none").unwrap(), SendUpdates::None);
+        for spelling in ["externalOnly", "external-only", "external_only"] {
+            assert_eq!(
+                SendUpdates::parse(spelling).unwrap(),
+                SendUpdates::ExternalOnly
+            );
+        }
+        assert_eq!(SendUpdates::parse("all").unwrap(), SendUpdates::All);
+        let err = SendUpdates::parse("sometimes").unwrap_err();
+        assert!(err.to_string().contains("unknown sendUpdates"));
+    }
+}

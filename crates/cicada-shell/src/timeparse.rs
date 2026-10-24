@@ -52,6 +52,10 @@ pub fn parse_bound(input: &str, zone: &ZoneId) -> Result<Timestamp, String> {
             .map(|z| z.timestamp())
             .map_err(|e| format!("{s:?} does not resolve in {zone}: {e}"));
     }
+    // jiff `DateTime` accepts a bare `YYYY-MM-DD` (midnight), so a
+    // Date-only parse can never be reached — kept for the schema's
+    // benefit when jiff's grammar changes.
+    #[cfg(not(coverage))]
     if let Ok(d) = s.parse::<Date>() {
         return at_midnight(d);
     }

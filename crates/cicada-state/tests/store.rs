@@ -179,3 +179,91 @@ fn resolve_state_path_prefers_flag_then_env_then_default() {
     );
     let _ = cicada_state::STATE_ENV; // named constant exists for docs
 }
+
+#[tokio::test]
+async fn load_errors_on_unreadable_and_malformed_documents() {
+    let dir = tempfile::tempdir().unwrap();
+
+    // Unreadable: the state path is a directory.
+    let asdir = dir.path().join("asdir");
+    fs::create_dir(&asdir).unwrap();
+    let store = JsonFileStateStore::new(&asdir);
+    let err = store.load().await.unwrap_err();
+    assert!(err.to_string().contains("cannot read state file"), "{err}");
+
+    let store = store_at(dir.path());
+    fs::create_dir_all(store.path().parent().unwrap()).unwrap();
+
+    // An empty (or whitespace-only) file loads as fresh state.
+    for source in ["", "  \n\n"] {
+        fs::write(store.path(), source).unwrap();
+        assert!(store.load().await.unwrap().calendars.is_empty());
+    }
+
+    // Right apiVersion, malformed body — probe passes, parse fails.
+    fs::write(
+        store.path(),
+        "apiVersion: cicada/state-v1\ncalendars: nope\n",
+    )
+    .unwrap();
+    let err = store.load().await.unwrap_err();
+    assert!(err.to_string().contains("malformed"), "{err}");
+
+    // Not valid YAML at all — the version probe itself fails.
+    fs::write(store.path(), "{{{{").unwrap();
+    let err = store.load().await.unwrap_err();
+    assert!(
+        err.to_string().contains("not a cicada state document"),
+        "{err}"
+    );
+}
+
+#[test]
+fn lock_fails_when_the_lock_file_cannot_be_created() {
+    let dir = tempfile::tempdir().unwrap();
+
+    // The lock path's parent is a regular file — mkdir fails.
+    let blocker = dir.path().join("blocker");
+    fs::write(&blocker, "x").unwrap();
+    let store = JsonFileStateStore::new(blocker.join("state.yaml"));
+    assert!(store.lock().is_err());
+    assert!(store.try_lock().is_err());
+
+    // The lock path itself is a directory — open fails.
+    let store = store_at(dir.path());
+    fs::create_dir_all(store.lock_path()).unwrap();
+    assert!(store.lock().is_err());
+    assert!(store.try_lock().is_err());
+}
+
+#[tokio::test]
+async fn save_fails_when_the_directory_is_unwritable_or_target_is_a_dir() {
+    let dir = tempfile::tempdir().unwrap();
+
+    // Parent can't be created — it collides with a regular file.
+    let blocker = dir.path().join("blocker");
+    fs::write(&blocker, "x").unwrap();
+    let store = JsonFileStateStore::new(blocker.join("state.yaml"));
+    let err = store.save(&RecordedState::new()).await.unwrap_err();
+    assert!(err.to_string().contains("cannot create"), "{err}");
+
+    // The temp file can't be created inside a read-only dir.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let ro = dir.path().join("ro");
+        fs::create_dir(&ro).unwrap();
+        fs::set_permissions(&ro, fs::Permissions::from_mode(0o555)).unwrap();
+        let store = JsonFileStateStore::new(ro.join("state.yaml"));
+        let err = store.save(&RecordedState::new()).await.unwrap_err();
+        assert!(err.to_string().contains("temp file"), "{err}");
+        fs::set_permissions(&ro, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    // The state path is a directory — the atomic rename can't land.
+    let target = dir.path().join("target-dir");
+    fs::create_dir(&target).unwrap();
+    let store = JsonFileStateStore::new(&target);
+    let err = store.save(&RecordedState::new()).await.unwrap_err();
+    assert!(err.to_string().contains("cannot replace"), "{err}");
+}

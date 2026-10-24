@@ -33,13 +33,7 @@ pub(crate) fn run(args: &RefreshArgs) -> ExitCode {
                 return ExitCode::FAILURE;
             }
         };
-    let runtime = match backend::runtime("refresh") {
-        Ok(rt) => rt,
-        Err(e) => {
-            eprintln!("{e}");
-            return ExitCode::FAILURE;
-        }
-    };
+    let runtime = crate::runtime_or_die("refresh");
 
     let _guard = match store.lock() {
         Ok(g) => g,
