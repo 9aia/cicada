@@ -1,5 +1,5 @@
 +++
-id = "ADR-0004"
+id = "ADR-0002"
 title = "ADR-0002: Reconciliation Contracts — the decisions v0.1 must not retrofit"
 status = "open"
 priority = "medium"

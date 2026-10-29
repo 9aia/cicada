@@ -1,5 +1,5 @@
 +++
-id = "ADR-0003"
+id = "ADR-0001"
 title = "ADR-0001: Foundational Architecture for Calendar-as-Code"
 status = "open"
 priority = "medium"
