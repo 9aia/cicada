@@ -7,6 +7,26 @@ and detect drift against live providers — the same way you manage
 infrastructure. With an MCP server so agents can own and reconcile
 calendars too.
 
+## Install
+
+```sh
+cargo install --git https://github.com/9aia/cicada cicada-cli   # `cicada`
+cargo install --git https://github.com/9aia/cicada cicada-mcp   # `cicada-mcp`
+```
+
+## Quickstart
+
+```sh
+cicada init            # scaffold cicada.yaml + calendars/work.yaml
+cicada validate        # schema + domain checks
+cicada plan            # diff desired vs recorded vs live
+cicada apply           # reconcile (idempotent, resumable)
+cicada drift           # detect out-of-band changes
+```
+
+The bundled `fake` provider demos the full lifecycle with no
+credentials; `cicada provider add google` wires a real calendar.
+
 ```yaml
 # calendar.yaml
 apiVersion: cicada/v1
@@ -28,10 +48,9 @@ spec:
 ```
 
 ```sh
-cicada plan      # diff desired vs recorded vs live
-cicada apply     # reconcile: create, update, delete, replace
-cicada drift     # detect out-of-band changes
 cicada range --from today --to +7d
+cicada show standup
+cicada fmt --check
 cicada mcp       # serve MCP over stdio — same core, for agents
 ```
 
@@ -185,6 +204,16 @@ cargo xtask check      # fmt + clippy -D warnings
 cargo xtask test       # whole suite (nextest if present)
 cargo xtask install    # release-build cicada + cicada-mcp → ~/.local/bin
 ```
+
+## Docs
+
+Full docs: **[9aia.com/cicada](https://9aia.com/cicada/)** — getting-started
+tutorial, how-to guides, CLI/DSL/MCP/state reference, architecture
+explanation (Diátaxis).
+
+[CONTRIBUTING](CONTRIBUTING.md) · [SECURITY](SECURITY.md) ·
+[LICENSE](LICENSE) (MIT) · [project](project/index.md) — TODO, backlog,
+ADRs
 
 ## License
 

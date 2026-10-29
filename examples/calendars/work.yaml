@@ -1,0 +1,24 @@
+apiVersion: cicada/v1
+kind: Calendar
+metadata:
+  name: work
+  timeZone: America/Sao_Paulo
+  provider: google
+  calendarId: primary
+spec:
+  events:
+    - id: standup
+      summary: Daily Standup
+      start: "09:00"
+      duration: 30m
+      recurrence: { freq: WEEKLY, byDay: [MO,TU,WE,TH,FR] }
+      attendees:
+        - { email: alice@x.com, required: true }
+      conferencing: meet
+      reminders: [{ popup: 10m }]
+    - id: retro
+      summary: Sprint Retrospective
+      start: "2026-11-06T16:00"
+      duration: 1h
+      recurrence: { freq: WEEKLY, interval: 2, byDay: [FR] }
+      reminders: [{ popup: 15m }, { email: 1h }]
