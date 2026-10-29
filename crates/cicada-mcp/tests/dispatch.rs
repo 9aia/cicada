@@ -544,3 +544,104 @@ async fn apply_errors_when_the_plan_has_error_diagnostics() {
     .await;
     assert!(out.is_error);
 }
+
+#[test]
+fn session_open_rejects_unknown_provider() {
+    // `provider_name(...)?` — an unrecognized provider name aborts
+    // session open before any file resolution.
+    let dir = tempfile::tempdir().unwrap();
+    let res = Session::open(&ServerOptions {
+        root: Some(dir.path().to_path_buf()),
+        provider: Some("bogus".into()),
+        fake_file: None,
+        state: None,
+    });
+    let Err(err) = res else {
+        panic!("bogus provider must fail")
+    };
+    assert!(err.contains("unknown provider"), "{err}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn events_range_singularizes_one_occurrence() {
+    // `occurrences.len() == 1` — the singular `""` arm of the
+    // pluralizer (the default fixture event repeats five times).
+    let dir = tempfile::tempdir().unwrap();
+    let session = fixture(dir.path());
+    let out = tools::dispatch(
+        &session,
+        &issued(),
+        "cicada.events.range",
+        args(json!({ "from": "2026-01-05", "to": "2026-01-06" })),
+    )
+    .await;
+    assert!(!out.is_error, "{}", out.text);
+    assert!(out.text.contains("1 occurrence in"), "{}", out.text);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn plan_preview_pluralizes_multiple_calendars() {
+    // `plans.len() != 1` — the plural `"s"` arm of the summary.
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("calendars")).unwrap();
+    fs::write(
+        dir.path().join("cicada.yaml"),
+        "apiVersion: cicada/v1\nkind: Manifest\ncalendars: [calendars/a.yaml, calendars/b.yaml]\n",
+    )
+    .unwrap();
+    for name in ["a", "b"] {
+        fs::write(
+            dir.path().join(format!("calendars/{name}.yaml")),
+            "apiVersion: cicada/v1\n\
+             kind: Calendar\n\
+             metadata:\n\
+             \x20 name: w\n\
+             \x20 timeZone: UTC\n\
+             spec:\n\
+             \x20 events:\n\
+             \x20   - id: standup\n\
+             \x20     summary: S\n\
+             \x20     start: \"2026-01-05T09:00:00\"\n\
+             \x20     duration: 30m\n",
+        )
+        .unwrap();
+    }
+    let session = Session::open(&ServerOptions {
+        root: Some(dir.path().to_path_buf()),
+        provider: None,
+        fake_file: None,
+        state: None,
+    })
+    .expect("session opens");
+    let out = tools::dispatch(&session, &issued(), "cicada.plan.preview", args(json!({}))).await;
+    assert!(!out.is_error, "{}", out.text);
+    assert!(out.text.contains("across 2 calendars"), "{}", out.text);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn plan_apply_fails_when_provider_cannot_open() {
+    // `.map_err(ToolOutcome::fatal)?` on `session.provider` in
+    // plan_apply_locked — the fake backend file turns unreadable
+    // between the preview that issued the digest and the apply.
+    let dir = tempfile::tempdir().unwrap();
+    let session = fixture(dir.path());
+    let set = issued();
+    let preview = tools::dispatch(&session, &set, "cicada.plan.preview", args(json!({}))).await;
+    assert!(!preview.is_error, "{}", preview.text);
+    let digest = preview.structured["planDigest"]
+        .as_str()
+        .expect("planDigest")
+        .to_owned();
+    let fake = dir.path().join(".cicada/fake-provider.json");
+    fs::create_dir_all(fake.parent().unwrap()).unwrap();
+    fs::write(&fake, "not json").unwrap();
+    let out = tools::dispatch(
+        &session,
+        &set,
+        "cicada.plan.apply",
+        args(json!({ "planDigest": digest, "confirm": true })),
+    )
+    .await;
+    assert!(out.is_error);
+    assert!(out.text.contains("cannot open"), "{}", out.text);
+}

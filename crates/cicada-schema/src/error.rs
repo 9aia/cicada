@@ -135,5 +135,8 @@ mod tests {
         assert_eq!(e.to_string(), "f.yaml:3:4: spec.events: m");
         e.column = None;
         assert_eq!(e.to_string(), "f.yaml:spec.events: m");
+        // No context at all — the `if let` skip arms on file,
+        // line/column, and path.
+        assert_eq!(SchemaError::document("m").to_string(), "m");
     }
 }

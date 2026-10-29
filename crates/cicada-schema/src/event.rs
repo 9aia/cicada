@@ -549,6 +549,16 @@ mod tests {
         .unwrap();
         assert!(end.is_wall());
         assert_eq!(end.local(), Date::constant(2026, 8, 20).at(1, 0, 0, 0));
+        // A clock end at-or-after the start clock stays on the same
+        // day — the `else` arm of the roll-forward check.
+        let end = resolve_end(
+            TimeSpec::Clock("23:30".parse().unwrap()),
+            &start,
+            &zone,
+            "e.end",
+        )
+        .unwrap();
+        assert_eq!(end.local(), Date::constant(2026, 8, 19).at(23, 30, 0, 0));
     }
 
     #[test]
@@ -669,6 +679,18 @@ mod tests {
         assert!(serde_json::from_str::<TimeSpec>("\"09:00\"").is_ok());
         assert!(serde_json::from_str::<TimeSpec>("42").is_err());
         assert!(serde_json::from_value::<TimeSpec>(serde_json::Value::Null).is_err());
+        // `serde_yaml::from_str` instantiations — the `?` on
+        // `Value::deserialize(d)` for syntactically malformed input,
+        // the `other` arm for non-string scalars, and both `String`
+        // outcomes.
+        assert!(serde_yaml::from_str::<SpecDuration>("[").is_err());
+        assert!(serde_yaml::from_str::<TimeSpec>("[").is_err());
+        assert!(serde_yaml::from_str::<SpecDuration>("42").is_err());
+        assert!(serde_yaml::from_str::<TimeSpec>("42").is_err());
+        assert!(serde_yaml::from_str::<SpecDuration>("bogus").is_err());
+        assert!(serde_yaml::from_str::<TimeSpec>("bogus").is_err());
+        assert!(serde_yaml::from_str::<SpecDuration>("30m").is_ok());
+        assert!(serde_yaml::from_str::<TimeSpec>("09:00").is_ok());
     }
 
     #[test]

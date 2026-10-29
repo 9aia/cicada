@@ -785,6 +785,40 @@ mod tests {
     }
 
     #[test]
+    fn from_wire_rejects_unparseable_start() {
+        // `time_from_wire(start_wire)?` — a garbage dateTime in start.
+        let mut wire =
+            to_wire(&wall_body(), &EventTags::default(), &BTreeMap::new(), None).unwrap();
+        wire.id = Some("evt-1".into());
+        wire.start = Some(EventDateTime {
+            date_time: Some("garbage".into()),
+            time_zone: None,
+            date: None,
+        });
+        assert!(from_wire(&wire).is_err());
+    }
+
+    #[test]
+    fn from_wire_reads_transparent_flag() {
+        // The `Some("transparent")` arm of the transparency match.
+        let mut wire =
+            to_wire(&wall_body(), &EventTags::default(), &BTreeMap::new(), None).unwrap();
+        wire.id = Some("evt-1".into());
+        wire.transparency = Some("transparent".into());
+        let remote = from_wire(&wire).unwrap();
+        assert_eq!(remote.body.transparency, Transparency::Transparent);
+    }
+
+    #[test]
+    fn to_wire_rejects_non_meet_conferencing() {
+        // The `Some(other)` arm — only Meet can serialize.
+        let mut body = wall_body();
+        body.conferencing = Some(Conferencing::Other("teams".into()));
+        let err = to_wire(&body, &EventTags::default(), &BTreeMap::new(), None).unwrap_err();
+        assert!(err.to_string().contains("conferencing"), "{err}");
+    }
+
+    #[test]
     fn from_wire_rejects_unparseable_end() {
         // `time_from_wire(end_wire)?` — a garbage dateTime in end.
         let mut wire =

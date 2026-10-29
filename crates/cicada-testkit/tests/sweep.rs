@@ -444,6 +444,24 @@ fn differ_flags_each_changed_field() {
     }
 }
 
+#[test]
+fn differ_surfaces_desired_time_render_errors() {
+    let differ = EventDiffer;
+    let a = body("A");
+    let mut b = body("B");
+    // `to: render_time(&desired.time)?` in diff() and `t.duration()?`
+    // in render_time() — the desired end is stored by the Range but
+    // lives in a zone that can't materialize to an instant.
+    b.time = EventTime::Range {
+        start: Time::Instant("2026-01-05T09:00:00Z".parse().unwrap()),
+        end: Time::Wall {
+            local: date(2026, 1, 5).at(10, 0, 0, 0),
+            zone: ZoneId::new_unchecked("Not/AZone"),
+        },
+    };
+    assert!(differ.diff(&b, &a).is_err());
+}
+
 // ---------- plan / planner edge paths ----------
 
 #[test]

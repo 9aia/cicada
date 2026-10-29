@@ -1501,9 +1501,19 @@ mod tests {
 
     #[test]
     fn weekday_and_frequency_full_codes() {
-        for (w, code) in [(Weekday::Saturday, "SA"), (Weekday::Sunday, "SU")] {
+        for (w, code) in [
+            (Weekday::Monday, "MO"),
+            (Weekday::Tuesday, "TU"),
+            (Weekday::Wednesday, "WE"),
+            (Weekday::Thursday, "TH"),
+            (Weekday::Friday, "FR"),
+            (Weekday::Saturday, "SA"),
+            (Weekday::Sunday, "SU"),
+        ] {
             assert_eq!(w.code(), code);
             assert_eq!(Weekday::from_str(code).unwrap(), w);
+            // Case-insensitive — the `to_ascii_uppercase` arm.
+            assert_eq!(Weekday::from_str(&code.to_lowercase()).unwrap(), w);
         }
         assert!(Weekday::from_str("XX").is_err());
         assert_eq!(serde_json::to_string(&Weekday::Saturday).unwrap(), "\"SA\"");

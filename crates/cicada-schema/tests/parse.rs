@@ -473,3 +473,71 @@ fn manifest_reports_unparseable_input() {
     // `parse_document(source)?` propagation arm in `parse_manifest`.
     assert!(parse_manifest("bogus: [").is_err());
 }
+
+#[test]
+fn malformed_field_yaml_propagates_value_deserialize_errors() {
+    // `serde_yaml::Value::deserialize(d)?` inside the spec
+    // deserializers — the YAML is syntactically broken *inside* a
+    // field value, so the `?` fires rather than a generic syntax
+    // error.
+    let err = parse_calendar(
+        "apiVersion: cicada/v1\n\
+         kind: Calendar\n\
+         metadata: { name: w, timeZone: UTC }\n\
+         spec:\n\
+         \x20 events:\n\
+         \x20   - id: e\n\
+         \x20     summary: s\n\
+         \x20     start: \"09:00\"\n\
+         \x20     duration: [unclosed\n",
+    )
+    .unwrap_err();
+    assert!(!err.message.is_empty(), "{err:?}");
+    // Same edge on the `TimeSpec` deserializer via `start:`.
+    let err = parse_calendar(
+        "apiVersion: cicada/v1\n\
+         kind: Calendar\n\
+         metadata: { name: w, timeZone: UTC }\n\
+         spec:\n\
+         \x20 events:\n\
+         \x20   - id: e\n\
+         \x20     summary: s\n\
+         \x20     start: [unclosed\n",
+    )
+    .unwrap_err();
+    assert!(!err.message.is_empty(), "{err:?}");
+    // A non-string scalar drives the `other` arm of the same match.
+    let err = parse_calendar(
+        "apiVersion: cicada/v1\n\
+         kind: Calendar\n\
+         metadata: { name: w, timeZone: UTC }\n\
+         spec:\n\
+         \x20 events:\n\
+         \x20   - id: e\n\
+         \x20     summary: s\n\
+         \x20     start: 42\n\
+         \x20     duration: 30m\n",
+    )
+    .unwrap_err();
+    assert!(err.message.contains("invalid time"), "{err:?}");
+}
+
+#[test]
+fn overnight_clock_end_overflows_at_the_civil_ceiling() {
+    // `map_err(...)?` in `resolve_end` — a bare-clock end earlier
+    // than the start's clock rolls a day forward, which overflows at
+    // jiff's maximum civil date.
+    let err = parse_calendar(
+        "apiVersion: cicada/v1\n\
+         kind: Calendar\n\
+         metadata: { name: w, timeZone: UTC }\n\
+         spec:\n\
+         \x20 events:\n\
+         \x20   - id: e\n\
+         \x20     summary: s\n\
+         \x20     start: \"9999-12-31T23:59\"\n\
+         \x20     end: \"00:30\"\n",
+    )
+    .unwrap_err();
+    assert!(err.message.contains("overflowed"), "{err:?}");
+}

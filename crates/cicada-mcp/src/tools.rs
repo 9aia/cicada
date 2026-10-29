@@ -1357,6 +1357,26 @@ mod tests {
         assert!(p.free_busy(&cal, range).await.is_err());
     }
 
+    #[tokio::test]
+    async fn plan_all_surfaces_calendar_and_store_failures() {
+        // `session.calendars()?` — a declared calendar file turns
+        // unreadable after open.
+        let (dir, session) = test_session();
+        std::fs::write(dir.path().join("calendars/work.yaml"), "not: [valid\n").unwrap();
+        let provider = session.provider("plan_all test").unwrap();
+        let err = plan_all(&session, &provider, None).await.unwrap_err();
+        assert!(err.is_error, "{}", err.text);
+
+        // `store().load()?` — the state file is malformed.
+        let (dir, session) = test_session();
+        let state = dir.path().join(".cicada/state.yaml");
+        std::fs::create_dir_all(state.parent().unwrap()).unwrap();
+        std::fs::write(&state, "not: [valid\n").unwrap();
+        let provider = session.provider("plan_all test").unwrap();
+        let err = plan_all(&session, &provider, None).await.unwrap_err();
+        assert!(err.is_error, "{}", err.text);
+    }
+
     #[test]
     fn remote_for_recorded_binds_in_order() {
         let (_dir, session) = test_session();

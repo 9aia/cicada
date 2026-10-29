@@ -643,6 +643,17 @@ mod tests {
             .validate()
             .is_err()
         );
+        // A resolvable Range — the `Ok(e.duration_since(s))` tail of
+        // `duration()` once both ends materialize.
+        assert_eq!(
+            EventTime::Range {
+                start: Time::Instant("2026-01-05T09:00:00Z".parse().unwrap()),
+                end: t_ok(),
+            }
+            .duration()
+            .unwrap(),
+            jiff::SignedDuration::from_mins(60)
+        );
     }
 
     #[test]
