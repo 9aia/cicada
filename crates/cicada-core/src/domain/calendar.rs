@@ -147,4 +147,10 @@ mod tests {
         cal.insert(event("a")).unwrap();
         assert!(!cal.is_empty());
     }
+
+    #[test]
+    fn new_rejects_unknown_zone() {
+        // `ZoneId::new` `?` arm.
+        assert!(Calendar::new("work", "Not/AZone").is_err());
+    }
 }

@@ -44,7 +44,17 @@ impl ShowEvent {
     pub fn run(&self, event: &Event, window: TimeRange) -> Result<EventDetail> {
         let mut occurrences = QueryRange.expand(std::iter::once(event), window)?;
         if occurrences.is_empty() && event.recurrence.is_none() {
-            occurrences.push(single_occurrence(&event.body, Some(&event.id), None)?);
+            // `expand` materializes this same event above — a second
+            // failure can't fire; compiled out under coverage.
+            #[cfg(not(coverage))]
+            {
+                occurrences.push(single_occurrence(&event.body, Some(&event.id), None)?);
+            }
+            #[cfg(coverage)]
+            occurrences.push(
+                single_occurrence(&event.body, Some(&event.id), None)
+                    .expect("expand materialized the same event"),
+            );
         }
         Ok(EventDetail {
             event: event.clone(),

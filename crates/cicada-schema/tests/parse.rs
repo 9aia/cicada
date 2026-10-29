@@ -467,3 +467,9 @@ spec:
     .unwrap_err();
     assert!(err.message.contains("bogus"), "{err:?}");
 }
+
+#[test]
+fn manifest_reports_unparseable_input() {
+    // `parse_document(source)?` propagation arm in `parse_manifest`.
+    assert!(parse_manifest("bogus: [").is_err());
+}

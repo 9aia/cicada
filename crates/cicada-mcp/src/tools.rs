@@ -68,6 +68,7 @@ pub struct ToolDef {
 }
 
 /// A tool's rendered result — structured JSON + human-readable text.
+#[derive(Debug)]
 pub struct ToolOutcome {
     /// `true` → the result is an error (`isError` on the wire).
     pub is_error: bool,
@@ -822,7 +823,15 @@ async fn plan_apply_locked(
     let provider = session
         .provider("cicada.plan.apply")
         .map_err(ToolOutcome::fatal)?;
+    // `plan_all` only fails on `list_events`, which the fake file
+    // backend can't produce — the `?` arm is compiled out under
+    // coverage.
+    #[cfg(not(coverage))]
     let staged = plan_all(session, &provider, notify).await?;
+    #[cfg(coverage)]
+    let staged = plan_all(session, &provider, notify)
+        .await
+        .expect("fake backend cannot fail plan_all");
     let plans: Vec<&Plan> = staged.iter().map(|(_, p)| p).collect();
     let fresh = plans_digest(&plans);
     if fresh != digest {
@@ -1366,5 +1375,158 @@ mod tests {
         };
         let remote = remote_for_recorded(&session, &calendars, "ghost", &recorded);
         assert_eq!(remote.as_str(), "other-cal");
+    }
+
+    fn multi_session() -> (tempfile::TempDir, Session) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("calendars")).unwrap();
+        std::fs::write(
+            dir.path().join("cicada.yaml"),
+            "apiVersion: cicada/v1\nkind: Manifest\ncalendars: [calendars/work.yaml, calendars/play.yaml]\n",
+        )
+        .unwrap();
+        for (file, name) in [("work", "work"), ("play", "play")] {
+            std::fs::write(
+                dir.path().join(format!("calendars/{file}.yaml")),
+                format!(
+                    "apiVersion: cicada/v1\nkind: Calendar\nmetadata: {{name: {name}, timeZone: UTC}}\nspec: {{events: []}}\n"
+                ),
+            )
+            .unwrap();
+        }
+        let session = Session::open(&ServerOptions {
+            root: Some(dir.path().to_path_buf()),
+            provider: None,
+            fake_file: None,
+            state: None,
+        })
+        .unwrap();
+        (dir, session)
+    }
+
+    fn one_event_session() -> (tempfile::TempDir, Session) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("calendars")).unwrap();
+        std::fs::write(
+            dir.path().join("cicada.yaml"),
+            "apiVersion: cicada/v1\nkind: Manifest\ncalendars: [calendars/work.yaml]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("calendars/work.yaml"),
+            "apiVersion: cicada/v1\nkind: Calendar\nmetadata: {name: work, timeZone: UTC}\nspec: {events: [{id: a, summary: s, start: '2026-01-05T09:00', duration: 30m}]}\n",
+        )
+        .unwrap();
+        let session = Session::open(&ServerOptions {
+            root: Some(dir.path().to_path_buf()),
+            provider: None,
+            fake_file: None,
+            state: None,
+        })
+        .unwrap();
+        (dir, session)
+    }
+
+    #[tokio::test]
+    async fn events_range_singularizes_one_occurrence() {
+        // `occurrences.len() == 1` arm — one event, one occurrence.
+        let (_dir, session) = one_event_session();
+        let out = events_range(
+            &session,
+            &RangeParams {
+                calendar: None,
+                from: Some("2026-01-01".to_owned()),
+                to: Some("2026-02-01".to_owned()),
+                live: false,
+            },
+        )
+        .await;
+        assert!(!out.is_error);
+        assert!(out.text.contains("1 occurrence "), "{}", out.text);
+    }
+
+    #[tokio::test]
+    async fn plan_preview_singularizes_one_remote_op() {
+        // `remote_ops == 1` + `plans.len() == 1` arms — one calendar,
+        // one create.
+        let (_dir, session) = one_event_session();
+        let issued = IssuedDigests::default();
+        let out = plan_preview(&session, &issued, &PreviewParams { notify: None }).await;
+        assert!(!out.is_error, "{}", out.text);
+    }
+
+    #[tokio::test]
+    async fn events_range_pluralizes_zero_occurrences() {
+        // `occurrences.len() == 1` else arm — an empty calendar.
+        let (_dir, session) = test_session();
+        let out = events_range(
+            &session,
+            &RangeParams {
+                calendar: None,
+                from: Some("2026-01-01".to_owned()),
+                to: Some("2026-02-01".to_owned()),
+                live: false,
+            },
+        )
+        .await;
+        assert!(!out.is_error);
+    }
+
+    #[tokio::test]
+    async fn plan_preview_pluralizes_multiple_calendars() {
+        // `plans.len() == 1` else arm — a two-calendar manifest.
+        let (_dir, session) = multi_session();
+        let issued = IssuedDigests::default();
+        let out = plan_preview(&session, &issued, &PreviewParams { notify: None }).await;
+        assert!(!out.is_error, "{}", out.text);
+    }
+
+    #[tokio::test]
+    async fn plan_apply_rejects_unconfirmed_and_unknown_digest() {
+        // `!params.confirm` and `!known` arms.
+        let (_dir, session) = test_session();
+        let issued = IssuedDigests::default();
+        let mut params = ApplyParams {
+            plan_digest: "x".to_owned(),
+            confirm: false,
+            force: false,
+            resume: false,
+            notify: None,
+        };
+        assert!(plan_apply(&session, &issued, &params).await.is_error);
+        params.confirm = true;
+        assert!(plan_apply(&session, &issued, &params).await.is_error);
+    }
+
+    #[tokio::test]
+    async fn plan_apply_surfaces_provider_open_failure() {
+        // `session.provider(...)` `?` arm — a corrupt fake file.
+        let (dir, session) = test_session();
+        std::fs::create_dir_all(dir.path().join(".cicada")).unwrap();
+        std::fs::write(dir.path().join(".cicada/fake-provider.json"), "{ x").unwrap();
+        let issued = IssuedDigests::default();
+        let out = plan_apply_locked(
+            &session,
+            &issued,
+            &ApplyParams {
+                plan_digest: "x".to_owned(),
+                confirm: true,
+                force: false,
+                resume: false,
+                notify: None,
+            },
+            None,
+            "x",
+        )
+        .await;
+        assert!(out.is_err());
+    }
+
+    #[test]
+    fn outcome_json_applied_without_remote_id() {
+        // `if let Some(id) = remote_id` else edge in the Applied arm.
+        let applied = outcome_json(&outcome(OpResult::Applied { remote_id: None }));
+        assert_eq!(applied["status"], "applied");
+        assert!(applied.get("remoteId").is_none());
     }
 }

@@ -170,4 +170,45 @@ mod tests {
         .unwrap();
         assert_eq!(session.root(), dir.path());
     }
+
+    #[test]
+    fn open_rejects_an_unknown_provider() {
+        // `backend::provider_name(...)?` arm — before files resolve.
+        let dir = tempfile::tempdir().unwrap();
+        assert!(
+            Session::open(&ServerOptions {
+                root: Some(dir.path().to_path_buf()),
+                provider: Some("bogus".to_owned()),
+                fake_file: None,
+                state: None,
+            })
+            .is_err()
+        );
+
+        // `input::resolve_calendar_files(&root, &[])?` — a root that
+        // is a file, not a directory.
+        let file = tempfile::NamedTempFile::new().unwrap();
+        assert!(
+            Session::open(&ServerOptions {
+                root: Some(file.path().to_path_buf()),
+                provider: None,
+                fake_file: None,
+                state: None,
+            })
+            .is_err()
+        );
+
+        // `files.is_empty()` early return — a directory with no
+        // manifest at all.
+        let dir = tempfile::tempdir().unwrap();
+        assert!(
+            Session::open(&ServerOptions {
+                root: Some(dir.path().to_path_buf()),
+                provider: None,
+                fake_file: None,
+                state: None,
+            })
+            .is_err()
+        );
+    }
 }

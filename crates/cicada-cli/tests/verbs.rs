@@ -383,6 +383,28 @@ fn apply_confirm_resume_notify_and_failures() {
 }
 
 #[test]
+fn apply_confirm_pluralizes_calendars() {
+    // `calendars == 1` else arm — a two-calendar manifest confirms
+    // with the plural form.
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("calendars")).unwrap();
+    fs::write(
+        dir.path().join("cicada.yaml"),
+        "apiVersion: cicada/v1\nkind: Manifest\ncalendars: [calendars/work.yaml, calendars/play.yaml]\n",
+    )
+    .unwrap();
+    fs::write(dir.path().join("calendars/work.yaml"), RICH_CALENDAR).unwrap();
+    fs::write(
+        dir.path().join("calendars/play.yaml"),
+        RICH_CALENDAR.replace("name: work", "name: play"),
+    )
+    .unwrap();
+    let out = cicada_stdin(dir.path(), &["apply"], "y\n");
+    assert!(out.status.success(), "{}", stdout(&out));
+    assert!(stdout(&out).contains("calendars"), "{}", stdout(&out));
+}
+
+#[test]
 fn apply_error_paths() {
     let dir = tempfile::tempdir().unwrap();
     let out = cicada(dir.path(), &["apply", "--provider", "bogus"]);
@@ -501,6 +523,11 @@ fn range_local_and_live_views() {
     // Bad bound.
     assert!(
         !cicada(dir.path(), &["range", "--from", "nope"])
+            .status
+            .success()
+    );
+    assert!(
+        !cicada(dir.path(), &["range", "--to", "nope"])
             .status
             .success()
     );
@@ -866,6 +893,25 @@ fn show_range_window_and_parse_errors() {
         &["show", "standup", "--from", "+30d", "--to", "today"],
     );
     assert!(!out.status.success());
+    // An unparseable --to fails parse_bound.
+    let out = cicada(dir.path(), &["show", "standup", "--to", "nope"]);
+    assert!(!out.status.success());
+    // Live view on a remote event carrying no `updated` stamp — the
+    // `if let Some(updated)` else edge.
+    let out = cicada(dir.path(), &["apply", "--auto-approve"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    let mut fake = fake_file(dir.path());
+    for ev in fake["calendars"]["primary"]
+        .as_object_mut()
+        .unwrap()
+        .values_mut()
+    {
+        ev.as_object_mut().unwrap().remove("updated");
+    }
+    write_fake(dir.path(), &fake);
+    let out = cicada(dir.path(), &["show", "standup", "--provider", "fake"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    assert!(stdout(&out).contains("occurrences"), "{}", stdout(&out));
 }
 
 #[test]

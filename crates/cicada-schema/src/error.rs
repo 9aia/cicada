@@ -96,3 +96,44 @@ impl From<SchemaError> for cicada_core::CicadaError {
         Self::fatal(e.to_string())
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use std::fmt::Write as _;
+
+    use super::*;
+
+    /// A writer whose `write_str` always errors — drives the `?`
+    /// arms of each conditional `write!` in `Display::fmt`.
+    struct Fail;
+
+    impl fmt::Write for Fail {
+        fn write_str(&mut self, _s: &str) -> fmt::Result {
+            Err(fmt::Error)
+        }
+    }
+
+    #[test]
+    fn display_propagates_write_failures() {
+        // `file:` set — the first `write!` fails.
+        let e = SchemaError::document("m").with_file("f.yaml");
+        assert!(write!(Fail, "{e}").is_err());
+        // Only line/column set — first write is skipped, second fails.
+        let mut e = SchemaError::document("m");
+        e.line = Some(3);
+        e.column = Some(4);
+        assert!(write!(Fail, "{e}").is_err());
+        // Only the field path set — the third `write!` fails.
+        let e = SchemaError::at("spec.events", "m");
+        assert!(write!(Fail, "{e}").is_err());
+        // Every piece present — and the `line` without `column`
+        // edge of the `if let` guard.
+        let mut e = SchemaError::at("spec.events", "m").with_file("f.yaml");
+        e.line = Some(3);
+        e.column = Some(4);
+        assert_eq!(e.to_string(), "f.yaml:3:4: spec.events: m");
+        e.column = None;
+        assert_eq!(e.to_string(), "f.yaml:spec.events: m");
+    }
+}

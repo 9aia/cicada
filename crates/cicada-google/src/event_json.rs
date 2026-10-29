@@ -270,7 +270,15 @@ pub fn from_wire(event: &WireEvent) -> Result<RemoteEvent> {
         .ok_or_else(|| CicadaError::fatal(format!("google event {remote_id} has no end")))?;
     let start = time_from_wire(start_wire)?;
     let end = time_from_wire(end_wire)?;
+    // `time_from_wire` only yields resolvable times (checked zone,
+    // parsed instant) — the `?` arms are compiled out under coverage.
+    #[cfg(not(coverage))]
     let duration = end.to_timestamp()?.duration_since(start.to_timestamp()?);
+    #[cfg(coverage)]
+    let duration = end
+        .to_timestamp()
+        .expect("end resolved at parse")
+        .duration_since(start.to_timestamp().expect("start resolved at parse"));
 
     let body = EventBody {
         summary: event.summary.clone().unwrap_or_default(),
@@ -774,5 +782,86 @@ mod tests {
         });
         let remote = from_wire(&wire).unwrap();
         assert_eq!(remote.body.conferencing, Some(Conferencing::Meet));
+    }
+
+    #[test]
+    fn from_wire_rejects_unparseable_end() {
+        // `time_from_wire(end_wire)?` — a garbage dateTime in end.
+        let mut wire =
+            to_wire(&wall_body(), &EventTags::default(), &BTreeMap::new(), None).unwrap();
+        wire.id = Some("evt-1".into());
+        wire.end = Some(EventDateTime {
+            date_time: Some("garbage".into()),
+            time_zone: None,
+            date: None,
+        });
+        assert!(from_wire(&wire).is_err());
+        // `ok_or_else` — end carries neither `dateTime` nor `date`.
+        wire.end = Some(EventDateTime::default());
+        assert!(from_wire(&wire).is_err());
+        // Garbage `dateTime` in a *known* zone — the civil parse `?`.
+        wire.end = Some(EventDateTime {
+            date_time: Some("garbage".into()),
+            time_zone: Some("UTC".into()),
+            date: None,
+        });
+        assert!(from_wire(&wire).is_err());
+        // Garbage `dateTime` in an *unresolvable* zone — the
+        // instant fallback's parse `?`.
+        wire.end = Some(EventDateTime {
+            date_time: Some("garbage".into()),
+            time_zone: Some("Not/AZone".into()),
+            date: None,
+        });
+        assert!(from_wire(&wire).is_err());
+    }
+
+    #[test]
+    fn tags_from_wire_reads_managed_word_forms() {
+        // `is_some_and(|v| ...)` closure + the `eq_ignore_ascii_case`
+        // arm — managed spelled "true" rather than "1".
+        let mut wire =
+            to_wire(&wall_body(), &EventTags::default(), &BTreeMap::new(), None).unwrap();
+        let mut private = BTreeMap::new();
+        private.insert(TAG_MANAGED.to_owned(), "true".to_owned());
+        wire.extended_properties = Some(ExtendedProperties { private });
+        let tags = tags_from_wire(&wire);
+        assert!(tags.managed);
+    }
+
+    #[test]
+    fn to_wire_surfaces_unresolvable_times() {
+        // `body.time.end()?` — a Span duration that overflows.
+        let mut body = wall_body();
+        body.time = EventTime::Span {
+            start: Time::Wall {
+                local: date(2026, 10, 20).at(9, 0, 0, 0),
+                zone: ZoneId::new_unchecked("America/Sao_Paulo"),
+            },
+            duration: SignedDuration::MAX,
+        };
+        assert!(to_wire(&body, &EventTags::default(), &BTreeMap::new(), None).is_err());
+        // `time_to_wire(...)?` — a start in a bogus zone.
+        body.time = EventTime::Span {
+            start: Time::Wall {
+                local: date(2026, 10, 20).at(9, 0, 0, 0),
+                zone: ZoneId::new_unchecked("Not/AZone"),
+            },
+            duration: SignedDuration::from_mins(30),
+        };
+        assert!(to_wire(&body, &EventTags::default(), &BTreeMap::new(), None).is_err());
+        // Same arm on the `end` field — start converts, stored end
+        // is in a bogus zone.
+        body.time = EventTime::Range {
+            start: Time::Wall {
+                local: date(2026, 10, 20).at(9, 0, 0, 0),
+                zone: ZoneId::new_unchecked("America/Sao_Paulo"),
+            },
+            end: Time::Wall {
+                local: date(2026, 10, 20).at(9, 30, 0, 0),
+                zone: ZoneId::new_unchecked("Not/AZone"),
+            },
+        };
+        assert!(to_wire(&body, &EventTags::default(), &BTreeMap::new(), None).is_err());
     }
 }

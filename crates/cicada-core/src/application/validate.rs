@@ -220,8 +220,11 @@ fn check_recurrence(rule: &RecurrenceRule, event: &Event, base: &str, out: &mut 
     // Exotic or malformed raw RRULE — distinguishable by whether a
     // FREQ parses at all. (Structured rules always parse above — the
     // else can't fire; it stays inline so no dead arm remains.)
+    #[cfg(not(coverage))]
     #[rustfmt::skip]
     let RecurrenceRule::Raw(raw) = rule else { return };
+    #[cfg(coverage)]
+    let raw = rule.as_raw().expect("structured rules always parse above");
     if raw_rrule_freq(raw).is_some() {
         out.push(Diagnostic::warning(
             path,

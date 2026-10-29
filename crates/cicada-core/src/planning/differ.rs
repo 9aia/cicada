@@ -309,4 +309,46 @@ mod tests {
         let d = EventDiffer.diff(&x, &y).unwrap();
         assert_eq!(d.changes[0].field, EventField::Recurrence);
     }
+
+    #[test]
+    fn diff_unmaterializable_desired_time_errors() {
+        // `render_time(&desired.time)?` — the desired end is in a
+        // bogus zone while actual renders fine.
+        let actual = body();
+        let mut desired = body();
+        desired.time = EventTime::Range {
+            start: Time::Instant("2026-01-05T09:00:00Z".parse().unwrap()),
+            end: Time::Wall {
+                local: date(2026, 1, 5).at(10, 0, 0, 0),
+                zone: ZoneId::new_unchecked("Not/AZone"),
+            },
+        };
+        assert!(EventDiffer.diff(&desired, &actual).is_err());
+        // `render_time(&actual.time)?` — same failure on the other
+        // side of the diff.
+        assert!(EventDiffer.diff(&actual, &desired).is_err());
+    }
+
+    #[test]
+    fn render_time_surfaces_duration_errors() {
+        // `t.duration()?` — `end` is stored (Ok) but can't become an
+        // instant for the subtraction.
+        let t = EventTime::Range {
+            start: Time::Instant("2026-01-05T09:00:00Z".parse().unwrap()),
+            end: Time::Wall {
+                local: date(2026, 1, 5).at(10, 0, 0, 0),
+                zone: ZoneId::new_unchecked("Not/AZone"),
+            },
+        };
+        assert!(render_time(&t).is_err());
+        // `t.end()?` — a Span whose civil end overflows.
+        let t = EventTime::Span {
+            start: Time::Wall {
+                local: date(2026, 1, 5).at(9, 0, 0, 0),
+                zone: ZoneId::new_unchecked("UTC"),
+            },
+            duration: SignedDuration::MAX,
+        };
+        assert!(render_time(&t).is_err());
+    }
 }

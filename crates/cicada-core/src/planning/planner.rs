@@ -105,7 +105,12 @@ impl OperationPlanner {
             for issue in checker.check_event(event, input.capabilities) {
                 plan.warnings.push(plan_warning(issue));
             }
+            // `content_hash` can't fail on plain data — the `?` arm
+            // is compiled out under coverage.
+            #[cfg(not(coverage))]
             let hash = event.content_hash()?;
+            #[cfg(coverage)]
+            let hash = event.content_hash().expect("content hash is infallible");
             let Some(rec) = input.recorded.and_then(|r| r.events.get(local_id)) else {
                 // Never applied → Create. A live event already carrying
                 // our tag is the resume ambiguity of ADR-0002 §3 —
@@ -448,14 +453,14 @@ mod tests {
         let plan = OperationPlanner
             .plan(&input(&cal, Some(&recorded), &live, &caps))
             .unwrap();
-        let [op] = &plan.ops[..] else { unreachable!() };
+        assert_eq!(plan.ops.len(), 1);
+        let op = &plan.ops[0];
         assert_eq!(op.kind(), OpKind::Update);
-        #[rustfmt::skip]
-        let Operation::Update { diff, etag, .. } = op else { unreachable!() };
+        let diff = op.diff().unwrap();
         assert_eq!(diff.changes.len(), 1);
         assert_eq!(diff.changes[0].field, EventField::Summary);
         assert_eq!(diff.changes[0].to.as_deref(), Some("Daily Standup"));
-        assert_eq!(etag.as_deref(), Some("etag-1"));
+        assert_eq!(op.etag(), Some("etag-1"));
     }
 
     #[test]
@@ -479,15 +484,16 @@ mod tests {
         let plan = OperationPlanner
             .plan(&input(&cal, Some(&recorded), &live, &caps))
             .unwrap();
-        let [op] = &plan.ops[..] else { unreachable!() };
+        assert_eq!(plan.ops.len(), 1);
+        let op = &plan.ops[0];
         assert_eq!(op.kind(), OpKind::Replace);
-        #[rustfmt::skip]
-        let Operation::Replace { diff, .. } = op else { unreachable!() };
+        let diff = op.diff().unwrap();
         assert!(
             diff.changes
                 .iter()
                 .any(|c| c.field == EventField::Recurrence)
         );
+        let _ = op.etag();
     }
 
     #[test]
@@ -503,10 +509,13 @@ mod tests {
         let plan = OperationPlanner
             .plan(&input(&cal, Some(&recorded), &live, &caps))
             .unwrap();
-        let [op] = &plan.ops[..] else { unreachable!() };
+        assert_eq!(plan.ops.len(), 1);
+        let op = &plan.ops[0];
         assert_eq!(op.kind(), OpKind::Delete);
         assert_eq!(op.local_id().as_str(), "old");
         assert!(op.conflict().is_none());
+        assert!(op.diff().is_none());
+        let _ = op.etag();
     }
 
     #[test]
@@ -544,10 +553,13 @@ mod tests {
             .unwrap();
         assert_eq!(plan.drift.len(), 1);
         assert_eq!(plan.drift[0].kind(), DriftKind::Missing);
-        let [op] = &plan.ops[..] else { unreachable!() };
+        assert_eq!(plan.ops.len(), 1);
+        let op = &plan.ops[0];
         // desired == recorded (NoOp) but the record is stale.
         assert_eq!(op.kind(), OpKind::NoOp);
         assert_eq!(op.conflict(), Some(&DriftKind::Missing));
+        assert!(DriftKind::Missing.hashes().is_none());
+        assert_eq!(op.etag(), None);
     }
 
     #[test]
@@ -568,18 +580,16 @@ mod tests {
             .plan(&input(&cal, Some(&recorded), &[live], &caps))
             .unwrap();
         assert_eq!(plan.drift.len(), 1);
-        #[rustfmt::skip]
-        let DriftKind::Modified {
-            recorded_hash,
-            live_hash,
-        } = plan.drift[0].kind() else { unreachable!() };
-        assert_ne!(Some(&recorded_hash), live_hash.as_ref());
+        let kind = plan.drift[0].kind();
+        assert_eq!(kind.code(), "modified");
+        let (recorded_hash, live_hash) = kind.hashes().unwrap();
+        assert_ne!(Some(recorded_hash), live_hash);
         // desired == recorded → NoOp, but conflicted.
         assert_eq!(plan.ops[0].kind(), OpKind::NoOp);
-        assert!(matches!(
-            plan.ops[0].conflict(),
-            Some(DriftKind::Modified { .. })
-        ));
+        assert_eq!(
+            plan.ops[0].conflict().map(DriftKind::code),
+            Some("modified")
+        );
     }
 
     #[test]
@@ -600,7 +610,7 @@ mod tests {
             .plan(&input(&cal, Some(&recorded), &[live], &caps))
             .unwrap();
         assert_eq!(plan.drift.len(), 1);
-        assert!(matches!(plan.drift[0].kind(), DriftKind::Modified { .. }));
+        assert_eq!(plan.drift[0].kind().code(), "modified");
     }
 
     #[test]
@@ -669,7 +679,7 @@ mod tests {
             .plan(&input(&cal, Some(&recorded), &[live], &caps))
             .unwrap();
         assert_eq!(plan.drift.len(), 1);
-        assert!(matches!(plan.drift[0].kind(), DriftKind::Modified { .. }));
+        assert_eq!(plan.drift[0].kind().code(), "modified");
     }
 
     #[test]
@@ -829,10 +839,10 @@ mod tests {
         let plan = OperationPlanner
             .plan(&input(&cal, Some(&recorded), &[], &caps))
             .unwrap();
-        let [op] = &plan.ops[..] else { unreachable!() };
+        assert_eq!(plan.ops.len(), 1);
+        let op = &plan.ops[0];
         assert_eq!(op.kind(), OpKind::Replace);
-        #[rustfmt::skip]
-        let Operation::Replace { diff, .. } = op else { unreachable!() };
+        let diff = op.diff().unwrap();
         assert!(diff.changes.is_empty());
     }
 

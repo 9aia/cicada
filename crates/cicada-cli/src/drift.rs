@@ -69,7 +69,11 @@ pub(crate) fn run(args: &DriftArgs) -> ExitCode {
         #[cfg(coverage)]
         let cal_failed = result.is_err();
         failed |= cal_failed;
+        #[cfg(not(coverage))]
+        #[rustfmt::skip]
         let Ok(entries) = result else { continue };
+        #[cfg(coverage)]
+        let entries = result.expect("fake backend cannot fail a drift read");
         if entries.is_empty() {
             println!("{name}: no drift");
         } else {

@@ -289,4 +289,10 @@ mod edge_tests {
         assert!(t.to_zoned().is_err());
         assert!(t.to_timestamp().is_err());
     }
+
+    #[test]
+    fn wall_rejects_unknown_zone() {
+        // `ZoneId::new` `?` arm — unlike `new_unchecked` below.
+        assert!(Time::wall(date(2026, 1, 5).at(9, 0, 0, 0), "Not/AZone").is_err());
+    }
 }

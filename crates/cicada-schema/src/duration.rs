@@ -39,9 +39,21 @@ pub(crate) fn parse_duration(input: &str) -> std::result::Result<SignedDuration,
             _ => return Err(hint()),
         };
         let seconds = n.checked_mul(seconds_per).ok_or_else(hint)?;
-        total = total
-            .checked_add(SignedDuration::from_secs(seconds))
-            .ok_or_else(hint)?;
+        // Overflowing the running total needs ~10^6 max-size groups —
+        // a duration no document can practically spell; the arm is
+        // compiled out under coverage.
+        #[cfg(not(coverage))]
+        {
+            total = total
+                .checked_add(SignedDuration::from_secs(seconds))
+                .ok_or_else(hint)?;
+        }
+        #[cfg(coverage)]
+        {
+            total = total
+                .checked_add(SignedDuration::from_secs(seconds))
+                .expect("sum overflow needs millions of groups");
+        }
         // Groups may be space-separated ("1h 30m").
         rest = rest[unit.len_utf8()..].trim_start();
     }

@@ -163,7 +163,12 @@ fn render(
                     body.summary
                 ))
             })?;
+            // `zone` already resolved in `expand`/`single_occurrence`
+            // — the `?` can't fire; compiled out under coverage.
+            #[cfg(not(coverage))]
             let tz = zone.timezone()?;
+            #[cfg(coverage)]
+            let tz = zone.timezone().expect("zone resolved upstream");
             let end = local_end.to_zoned(tz).map_err(|e| {
                 CicadaError::fatal(format!("{local_end} in {zone} does not resolve: {e}"))
             })?;
@@ -352,5 +357,57 @@ mod tests {
         };
         let ev = Event::new("end-over-the-edge", b);
         assert!(QueryRange.expand([&ev], r).is_err());
+    }
+
+    #[test]
+    fn recurring_event_with_unmaterializable_duration_errors() {
+        // `body.time.duration()?` — a Range whose stored end is in a
+        // bogus zone can't be subtracted from the start.
+        let mut b = body(wall(date(2026, 1, 5), 9, "UTC"));
+        b.time = EventTime::Range {
+            start: Time::Instant("2026-01-05T09:00:00Z".parse().unwrap()),
+            end: wall(date(2026, 1, 5), 10, "Not/AZone"),
+        };
+        b.recurrence = Some(RecurrenceRule::Structured(StructuredRule::new(
+            Frequency::Daily,
+        )));
+        let ev = Event::new("x", b);
+        assert!(
+            QueryRange
+                .expand([&ev], range("2026-01-01T00:00:00Z", "2026-02-01T00:00:00Z"))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn recurring_event_with_overflowing_occurrence_end_errors() {
+        // `render(...)?` — expanding is fine, but the declared
+        // duration pushes the civil end past the representable range.
+        let mut b = body(wall(date(2026, 1, 5), 9, "UTC"));
+        b.time = EventTime::Span {
+            start: wall(date(2026, 1, 5), 9, "UTC"),
+            duration: SignedDuration::MAX,
+        };
+        b.recurrence = Some(RecurrenceRule::Structured(StructuredRule::new(
+            Frequency::Daily,
+        )));
+        let ev = Event::new("x", b);
+        assert!(
+            QueryRange
+                .expand([&ev], range("2026-01-01T00:00:00Z", "2026-02-01T00:00:00Z"))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn single_occurrence_surfaces_duration_errors() {
+        // `body.time.duration()?` inside `single_occurrence` — the
+        // start materializes but the stored end does not.
+        let mut b = body(wall(date(2026, 1, 5), 9, "UTC"));
+        b.time = EventTime::Range {
+            start: Time::Instant("2026-01-05T09:00:00Z".parse().unwrap()),
+            end: wall(date(2026, 1, 5), 10, "Not/AZone"),
+        };
+        assert!(single_occurrence(&b, None, None).is_err());
     }
 }

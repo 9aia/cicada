@@ -44,6 +44,18 @@ impl DriftKind {
             Self::Modified { .. } => "modified",
         }
     }
+
+    /// `(recorded_hash, live_hash)` for [`DriftKind::Modified`];
+    /// `None` for `Missing`.
+    pub fn hashes(&self) -> Option<(&ContentHash, Option<&ContentHash>)> {
+        match self {
+            Self::Modified {
+                recorded_hash,
+                live_hash,
+            } => Some((recorded_hash, live_hash.as_ref())),
+            Self::Missing => None,
+        }
+    }
 }
 
 impl std::fmt::Display for DriftKind {

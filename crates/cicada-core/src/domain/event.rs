@@ -386,6 +386,45 @@ mod tests {
     }
 
     #[test]
+    fn validate_fails_when_end_cannot_materialize() {
+        // `end()` errors on civil overflow (Span) and on an
+        // unresolvable stored end zone (Range) — both `?` arms.
+        let mut span = body();
+        span.time = EventTime::Span {
+            start: Time::Wall {
+                local: date(2026, 1, 5).at(9, 0, 0, 0),
+                zone: ZoneId::new_unchecked("UTC"),
+            },
+            duration: SignedDuration::MAX,
+        };
+        assert!(span.validate().is_err());
+        let mut ranged = body();
+        ranged.time = EventTime::Range {
+            start: Time::Instant("2026-01-05T09:00:00Z".parse().unwrap()),
+            end: Time::Wall {
+                local: date(2026, 1, 5).at(10, 0, 0, 0),
+                zone: ZoneId::new_unchecked("Not/AZone"),
+            },
+        };
+        assert!(ranged.validate().is_err());
+        // `duration`'s `start.to_timestamp()?` — bogus start, fine end.
+        ranged.time = EventTime::Range {
+            start: Time::Wall {
+                local: date(2026, 1, 5).at(9, 0, 0, 0),
+                zone: ZoneId::new_unchecked("Not/AZone"),
+            },
+            end: Time::Instant("2026-01-05T10:00:00Z".parse().unwrap()),
+        };
+        assert!(ranged.validate().is_err());
+        // `e <= s` — an end that isn't after its start.
+        ranged.time = EventTime::Range {
+            start: Time::Instant("2026-01-05T10:00:00Z".parse().unwrap()),
+            end: Time::Instant("2026-01-05T09:00:00Z".parse().unwrap()),
+        };
+        assert!(ranged.validate().is_err());
+    }
+
+    #[test]
     fn validate_fails_on_unresolvable_zone() {
         // A bogus zone can't produce timestamps — the `?` arm.
         let mut b = body();

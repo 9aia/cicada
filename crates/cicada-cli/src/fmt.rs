@@ -118,3 +118,21 @@ fn event_order(source: &str) -> Vec<LocalId> {
                 .collect()
         })
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn event_order_falls_back_on_missing_keys() {
+        // Each `?` arm: no `spec`, `spec` without `events`, an event
+        // without `id`.
+        assert!(event_order("foo: 1").is_empty());
+        assert!(event_order("spec: {name: x}").is_empty());
+        assert_eq!(
+            event_order("spec: {events: [{summary: s}, {id: a}]}"),
+            vec![LocalId::new("a")]
+        );
+    }
+}

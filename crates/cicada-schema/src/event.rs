@@ -50,7 +50,7 @@ impl<'de> Deserialize<'de> for SpecDuration {
 }
 
 /// One `start`/`end` scalar, before the calendar zone is attached.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TimeSpec {
     /// `"09:00"` — wall clock with no date.
     Clock(Clock),
@@ -510,23 +510,26 @@ mod tests {
 
     #[test]
     fn time_spec_parses_each_form() {
-        assert!(matches!(parse_time("09:00").unwrap(), TimeSpec::Clock(_)));
-        assert!(matches!(
+        assert_eq!(
+            parse_time("09:00").unwrap(),
+            TimeSpec::Clock("09:00".parse().unwrap())
+        );
+        assert_eq!(
             parse_time("2026-08-19").unwrap(),
-            TimeSpec::Local(_)
-        ));
-        assert!(matches!(
+            TimeSpec::Local(Date::constant(2026, 8, 19).at(0, 0, 0, 0))
+        );
+        assert_eq!(
             parse_time("2026-08-19T09:00").unwrap(),
-            TimeSpec::Local(_)
-        ));
-        assert!(matches!(
+            TimeSpec::Local(Date::constant(2026, 8, 19).at(9, 0, 0, 0))
+        );
+        assert_eq!(
             parse_time("2026-08-19T09:00:00-03:00").unwrap(),
-            TimeSpec::Instant(_)
-        ));
-        assert!(matches!(
+            TimeSpec::Instant("2026-08-19T09:00:00-03:00".parse().unwrap())
+        );
+        assert_eq!(
             parse_time("2026-08-19T09:00:00Z").unwrap(),
-            TimeSpec::Instant(_)
-        ));
+            TimeSpec::Instant("2026-08-19T09:00:00Z".parse().unwrap())
+        );
         assert!(parse_time("nope").is_err());
     }
 
@@ -544,9 +547,8 @@ mod tests {
             "e.end",
         )
         .unwrap();
-        #[rustfmt::skip]
-        let Time::Wall { local, .. } = end else { unreachable!() };
-        assert_eq!(local, Date::constant(2026, 8, 20).at(1, 0, 0, 0));
+        assert!(end.is_wall());
+        assert_eq!(end.local(), Date::constant(2026, 8, 20).at(1, 0, 0, 0));
     }
 
     #[test]
@@ -684,5 +686,63 @@ mod tests {
         let r = rule("{freq: MONTHLY, byDay: [-1FR], byMonthDay: [30]}");
         assert!(rule_generates_on(&r, Date::constant(2026, 1, 30)));
         assert!(!rule_generates_on(&r, Date::constant(2026, 1, 23)));
+    }
+
+    #[test]
+    fn clock_end_with_instant_start_errors() {
+        // `resolve_end`'s `(Clock, Instant)` arm — a bare-clock end
+        // has no date to attach to an instant start.
+        let zone = ZoneId::new_unchecked("UTC");
+        let start = Time::Instant("2026-08-19T09:00:00Z".parse().unwrap());
+        assert!(
+            resolve_end(
+                TimeSpec::Clock("10:00".parse().unwrap()),
+                &start,
+                &zone,
+                "e.end"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn clock_start_with_unmatchable_rule_errors() {
+        // `anchor_datetime` finds no date the rule accepts — the
+        // `ok_or_else` `?` inside `clock_start`.
+        let err = crate::parse_calendar(
+            "apiVersion: cicada/v1\nkind: Calendar\nmetadata: {name: w, timeZone: UTC}\nspec: {events: [{id: a, summary: s, start: '09:00', duration: 30m, recurrence: 'FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=30'}]}\n",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("anchor"), "{err}");
+    }
+
+    #[test]
+    fn local_and_instant_end_specs_resolve() {
+        // `resolve_end`'s `(Local, _)` and `(Instant, _)` arms.
+        let zone = ZoneId::new_unchecked("UTC");
+        let start = Time::Wall {
+            local: Date::constant(2026, 8, 19).at(9, 0, 0, 0),
+            zone: zone.clone(),
+        };
+        assert!(
+            resolve_end(
+                TimeSpec::Local(Date::constant(2026, 8, 20).at(10, 0, 0, 0)),
+                &start,
+                &zone,
+                "e.end"
+            )
+            .unwrap()
+            .is_wall()
+        );
+        assert!(
+            !resolve_end(
+                TimeSpec::Instant("2026-08-20T10:00:00Z".parse().unwrap()),
+                &start,
+                &zone,
+                "e.end"
+            )
+            .unwrap()
+            .is_wall()
+        );
     }
 }

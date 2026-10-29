@@ -27,6 +27,9 @@ fn document_level_failures() {
         "---\nkind: x\n---\nkind: y\n",
         // First doc parses — the second document is what errors.
         "apiVersion: cicada/v1\nkind: Manifest\ncalendars: []\n---\nkind: x\n",
+        // kind dispatches to ManifestDoc, which then fails to
+        // deserialize — the `?` inside the Manifest arm.
+        "apiVersion: cicada/v1\nkind: Manifest\ncalendars: bogus\n",
     ] {
         let err = parse_document(source).unwrap_err();
         assert!(!err.to_string().is_empty(), "{source:?}");

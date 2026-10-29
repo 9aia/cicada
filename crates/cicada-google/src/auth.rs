@@ -598,7 +598,7 @@ mod tests {
         let err = token_request(&http, "https://t.example/token", &[])
             .await
             .unwrap_err();
-        assert!(matches!(err, CicadaError::Conflict(_)), "{err:?}");
+        assert_eq!(err.kind(), ErrorKind::Conflict, "{err:?}");
     }
 
     #[tokio::test]
@@ -625,14 +625,14 @@ mod tests {
             body: body.to_vec(),
         };
         // 429/5xx stay Transient (retriable).
-        assert!(matches!(
-            classify_token_error(&resp(429, b"{}")),
-            CicadaError::Transient { .. }
-        ));
-        assert!(matches!(
-            classify_token_error(&resp(503, b"{}")),
-            CicadaError::Transient { .. }
-        ));
+        assert_eq!(
+            classify_token_error(&resp(429, b"{}")).kind(),
+            ErrorKind::Transient
+        );
+        assert_eq!(
+            classify_token_error(&resp(503, b"{}")).kind(),
+            ErrorKind::Transient
+        );
         // 400 with an error_description surfaces it; the plain `error`
         // field and raw-body fallbacks work too.
         let e = classify_token_error(&resp(

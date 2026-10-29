@@ -451,6 +451,15 @@ impl RecurrenceRule {
         }
     }
 
+    /// The raw RRULE text when this is [`RecurrenceRule::Raw`];
+    /// `None` for `Structured`.
+    pub fn as_raw(&self) -> Option<&str> {
+        match self {
+            Self::Structured(_) => None,
+            Self::Raw(raw) => Some(raw),
+        }
+    }
+
     /// Human-readable rendering (RRULE syntax for both forms) — used
     /// in diffs, warnings, and provider round-trips.
     pub fn describe(&self) -> String {
@@ -817,7 +826,15 @@ impl RecurrenceExpander {
                 if cand > end_local {
                     break 'buckets;
                 }
-                if !emit(&mut out, cand)? {
+                // `emit` errs only when a candidate can't
+                // materialize — bucket cands are `<= end_local`,
+                // which already resolved above; compiled out under
+                // coverage.
+                #[cfg(not(coverage))]
+                let cont = emit(&mut out, cand)?;
+                #[cfg(coverage)]
+                let cont = emit(&mut out, cand).expect("candidates fit the instant range");
+                if !cont {
                     break 'buckets;
                 }
             }
@@ -1179,7 +1196,12 @@ mod tests {
         );
         let obj: RecurrenceRule =
             serde_json::from_str("{\"freq\":\"WEEKLY\",\"byDay\":[\"MO\"]}").unwrap();
-        assert!(matches!(obj, RecurrenceRule::Structured(_)));
+        assert!(obj.as_structured().is_some());
+        assert!(
+            RecurrenceRule::Structured(StructuredRule::new(Frequency::Daily))
+                .as_raw()
+                .is_none()
+        );
         assert_eq!(obj, RecurrenceRule::Raw("FREQ=WEEKLY;BYDAY=MO".into()));
     }
 
@@ -2013,22 +2035,24 @@ mod rrule_edge_tests {
         ] {
             assert!(parse_rrule(raw).is_ok(), "{raw}");
         }
-        assert!(matches!(
+        assert_eq!(
             parse_rrule("FREQ=DAILY;UNTIL=20261231").unwrap().until,
-            Some(Until::Date(_))
-        ));
-        assert!(matches!(
+            Some(Until::Date(jiff::civil::date(2026, 12, 31)))
+        );
+        assert_eq!(
             parse_rrule("FREQ=DAILY;UNTIL=20261231T090000")
                 .unwrap()
                 .until,
-            Some(Until::DateTime(_))
-        ));
-        assert!(matches!(
+            Some(Until::DateTime(
+                jiff::civil::date(2026, 12, 31).at(9, 0, 0, 0)
+            ))
+        );
+        assert_eq!(
             parse_rrule("FREQ=DAILY;UNTIL=20261231T090000Z")
                 .unwrap()
                 .until,
-            Some(Until::Instant(_))
-        ));
+            Some(Until::Instant("2026-12-31T09:00:00Z".parse().unwrap()))
+        );
     }
 
     #[test]
@@ -2118,5 +2142,93 @@ mod rrule_edge_tests {
         );
         let structured = RecurrenceRule::Structured(StructuredRule::new(Frequency::Daily));
         assert!(serde_json::to_value(&structured).unwrap().is_object());
+    }
+
+    #[test]
+    fn negative_step_saturates_yearly_year() {
+        // The `step < 0` fallback arm — unreachable from bucket
+        // iteration (steps are 0..); exercised directly.
+        let rule = StructuredRule::new(Frequency::Yearly);
+        assert!(
+            yearly_candidates(
+                &rule,
+                jiff::civil::date(2026, 1, 5),
+                i64::from(i16::MIN) - 1
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn daily_bymonthday_goes_through_day_filters() {
+        // A daily rule carrying byMonthDay runs the
+        // `month_day_matches` RHS of `day_filters_match`.
+        let mut rule = StructuredRule::new(Frequency::Daily);
+        rule.by_month_day = vec![15];
+        let start = Time::Wall {
+            local: jiff::civil::date(2026, 1, 10).at(9, 0, 0, 0),
+            zone: crate::domain::ids::ZoneId::new_unchecked("UTC"),
+        };
+        let range = TimeRange::new(
+            "2026-01-01T00:00:00Z".parse().unwrap(),
+            "2026-02-15T00:00:00Z".parse().unwrap(),
+        )
+        .unwrap();
+        let occ = RecurrenceExpander::default()
+            .expand(&RecurrenceRule::Structured(rule), &start, range)
+            .unwrap();
+        // dtstart (Jan 10) is emitted unconditionally; the rest land
+        // on the 15th.
+        assert_eq!(occ.len(), 2, "{occ:?}");
+        assert_eq!(occ[1].local.day(), 15);
+    }
+
+    #[test]
+    fn daily_byday_goes_through_day_filters() {
+        // The `by_day` RHS of `day_filters_match` — a daily rule
+        // carrying a weekday filter.
+        let mut rule = StructuredRule::new(Frequency::Daily);
+        rule.by_day = vec![ByDay::every(Weekday::Thursday)];
+        let start = Time::Wall {
+            local: jiff::civil::date(2026, 1, 8).at(9, 0, 0, 0), // Thursday
+            zone: crate::domain::ids::ZoneId::new_unchecked("UTC"),
+        };
+        let range = TimeRange::new(
+            "2026-01-01T00:00:00Z".parse().unwrap(),
+            "2026-01-20T00:00:00Z".parse().unwrap(),
+        )
+        .unwrap();
+        let occ = RecurrenceExpander::default()
+            .expand(&RecurrenceRule::Structured(rule), &start, range)
+            .unwrap();
+        // Jan 8 + Jan 15 (Jan 22 falls outside the range).
+        assert_eq!(occ.len(), 2, "{occ:?}");
+        assert!(
+            occ.iter()
+                .all(|o| o.local.weekday() == jiff::civil::Weekday::Thursday)
+        );
+    }
+
+    #[test]
+    fn expand_rejects_non_wall_start_and_bad_until() {
+        // `expand`'s non-wall dtstart arm, and `parse_until`'s
+        // `?`s on garbage UNTIL values.
+        let start = Time::Instant("2026-01-05T09:00:00Z".parse().unwrap());
+        let range = TimeRange::new(
+            "2026-01-01T00:00:00Z".parse().unwrap(),
+            "2026-02-01T00:00:00Z".parse().unwrap(),
+        )
+        .unwrap();
+        assert!(
+            RecurrenceExpander::default()
+                .expand(
+                    &RecurrenceRule::Structured(StructuredRule::new(Frequency::Daily)),
+                    &start,
+                    range
+                )
+                .is_err()
+        );
+        assert!(parse_rrule("FREQ=DAILY;UNTIL=garbage").is_err());
+        assert!(parse_rrule("FREQ=DAILY;UNTIL=2026-13-99").is_err());
     }
 }

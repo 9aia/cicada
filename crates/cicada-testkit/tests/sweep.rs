@@ -942,3 +942,46 @@ async fn forced_noop_rewrite_errors_without_desired_event() {
         "{outcome:?}"
     );
 }
+
+#[test]
+fn raw_rrule_capability_gaps_use_the_parsed_form() {
+    // Raw RRULEs that normalize hit the same checks as structured
+    // rules (the `Some(r)` arm); unparseable ones hit the raw gate.
+    let checker = CapabilityChecker;
+    let mut caps = ProviderCapabilities::permissive();
+    caps.recurrence.frequencies = vec![Frequency::Weekly];
+    caps.recurrence.supports_ordinal_by_day = false;
+    caps.recurrence.supports_by_month_day = false;
+    caps.recurrence.supports_by_month = false;
+    caps.recurrence.supports_raw_rrule = false;
+
+    for (raw, want) in [
+        ("FREQ=DAILY", "DAILY"),
+        ("FREQ=WEEKLY;BYDAY=-1FR", "ordinal byDay"),
+        ("FREQ=MONTHLY;BYMONTHDAY=15", "byMonthDay"),
+        ("FREQ=YEARLY;BYMONTH=3", "byMonth"),
+    ] {
+        let mut b = body("x");
+        b.recurrence = Some(RecurrenceRule::Raw(raw.into()));
+        let issues = checker.check_body(&b, Some("x"), &caps);
+        assert!(
+            issues.iter().any(|i| i.message.contains(want)),
+            "{raw}: {issues:?}"
+        );
+    }
+
+    let mut b = body("x");
+    b.recurrence = Some(RecurrenceRule::Raw("GARBAGE".into()));
+    let issues = checker.check_body(&b, Some("x"), &caps);
+    assert!(
+        issues.iter().any(|i| i.message.contains("raw RRULE")),
+        "{issues:?}"
+    );
+
+    // Same unparseable rule with raw RRULEs allowed — the `if`
+    // guard's false edge (no error pushed).
+    let mut caps = ProviderCapabilities::permissive();
+    let issues = checker.check_body(&b, Some("x"), &caps);
+    assert!(issues.is_empty(), "{issues:?}");
+    let _ = &mut caps;
+}

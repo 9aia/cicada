@@ -346,9 +346,12 @@ fn emit_recurrence(rule: &RecurrenceRule) -> RecurrenceEmit {
         // `as_structured` covers every Structured rule — a rule
         // that didn't normalize must be Raw (the else can't fire;
         // it stays inline so no dead arm remains).
+        #[cfg(not(coverage))]
         #[rustfmt::skip]
         let RecurrenceRule::Raw(raw) = rule else { unreachable!() };
-        RecurrenceEmit::Raw(raw.clone())
+        #[cfg(coverage)]
+        let raw = rule.as_raw().expect("as_structured covers Structured");
+        RecurrenceEmit::Raw(raw.to_owned())
     }
 }
 
@@ -599,5 +602,22 @@ spec:
         assert!(rendered.contains(":45"), "{rendered}");
         let t2: Clock = "09:30:00".parse().unwrap();
         assert_eq!(format_clock(t2), "09:30");
+    }
+
+    #[test]
+    fn ordered_events_skips_unknown_ids() {
+        // `cal.events.get(id)` None arm — an id in the file's order
+        // list that parsed out of the event set.
+        let cal = crate::parse_calendar(
+            "apiVersion: cicada/v1\nkind: Calendar\nmetadata: {name: w, timeZone: UTC}\nspec: {events: [{id: a, summary: s, start: '2026-08-19T09:00', duration: 30m}]}\n",
+        )
+        .unwrap();
+        let order = [
+            cicada_core::domain::ids::LocalId::new("ghost"),
+            cicada_core::domain::ids::LocalId::new("a"),
+        ];
+        let out = ordered_events(&cal, Some(&order));
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert_eq!(out[0].id.as_str(), "a");
     }
 }

@@ -201,6 +201,26 @@ impl Operation {
         }
     }
 
+    /// The human-readable field diff for ops that carry one
+    /// (`Update`, `Replace`); `None` for `Create`, `Delete`, `NoOp`.
+    pub fn diff(&self) -> Option<&EventDiff> {
+        match self {
+            Self::Update { diff, .. } | Self::Replace { diff, .. } => Some(diff),
+            Self::Create { .. } | Self::Delete { .. } | Self::NoOp { .. } => None,
+        }
+    }
+
+    /// The recorded remote ETag for ops that carry one (`Update`,
+    /// `Replace`, `Delete`); `None` for `Create`, `NoOp`.
+    pub fn etag(&self) -> Option<&str> {
+        match self {
+            Self::Update { etag, .. } | Self::Replace { etag, .. } | Self::Delete { etag, .. } => {
+                etag.as_deref()
+            }
+            Self::Create { .. } | Self::NoOp { .. } => None,
+        }
+    }
+
     /// Mark this op conflicted by `drift` — planner-facing; called
     /// once per op after construction.
     pub fn set_conflict(&mut self, drift: DriftKind) {

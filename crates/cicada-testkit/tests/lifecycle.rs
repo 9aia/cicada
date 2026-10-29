@@ -522,6 +522,144 @@ impl CalendarProvider for FailingProvider {
     }
 }
 
+/// A provider whose `list_events` always errors — the `?`
+/// propagation arms of `DetectDrift`/`RefreshState`.
+struct ListFailProvider(FakeCalendarProvider);
+
+#[async_trait::async_trait]
+impl CalendarProvider for ListFailProvider {
+    fn capabilities(&self) -> cicada_core::domain::capabilities::ProviderCapabilities {
+        self.0.capabilities()
+    }
+    async fn list_events(
+        &self,
+        _c: &CalendarRef,
+        _r: Option<cicada_core::domain::time::TimeRange>,
+    ) -> Result<Vec<RemoteEvent>> {
+        Err(CicadaError::transient("list exploded"))
+    }
+    async fn get_event(&self, c: &CalendarRef, i: &RemoteId) -> Result<Option<RemoteEvent>> {
+        self.0.get_event(c, i).await
+    }
+    async fn find_by_tag(&self, c: &CalendarRef, i: &LocalId) -> Result<Option<RemoteEvent>> {
+        self.0.find_by_tag(c, i).await
+    }
+    async fn create_event(
+        &self,
+        c: &CalendarRef,
+        e: &EventBody,
+        i: &LocalId,
+        o: &WriteOptions,
+    ) -> Result<RemoteEvent> {
+        self.0.create_event(c, e, i, o).await
+    }
+    async fn update_event(
+        &self,
+        c: &CalendarRef,
+        i: &RemoteId,
+        e: &EventBody,
+        o: &WriteOptions,
+    ) -> Result<RemoteEvent> {
+        self.0.update_event(c, i, e, o).await
+    }
+    async fn delete_event(&self, c: &CalendarRef, i: &RemoteId, o: &WriteOptions) -> Result<()> {
+        self.0.delete_event(c, i, o).await
+    }
+    async fn free_busy(
+        &self,
+        c: &CalendarRef,
+        r: cicada_core::domain::time::TimeRange,
+    ) -> Result<Vec<cicada_core::domain::time::TimeRange>> {
+        self.0.free_busy(c, r).await
+    }
+}
+
+#[tokio::test]
+async fn refresh_propagates_load_list_and_save_failures() {
+    let provider = FakeCalendarProvider::new();
+    let clock = clock();
+    let v1 = calendar(vec![Event::new("a", body("A"))]);
+    let inner = MemoryStateStore::new();
+    let p1 = plan(&v1, &provider, &inner, &clock).await;
+    apply(&v1, &p1, &provider, &inner, &clock, false, false).await;
+
+    // `state.load()` `?` arm.
+    let store = ErrStore {
+        inner,
+        fail_load: true,
+        fail_save: false,
+        fail_journal: false,
+    };
+    let err = RefreshState::new()
+        .run(&RefreshRequest {
+            calendar_name: "work",
+            provider: &provider,
+            remote_calendar: &primary(),
+            state: &store,
+            clock: &clock,
+        })
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("load exploded"), "{err}");
+
+    // `provider.list_events()` `?` arm.
+    let failing = ListFailProvider(FakeCalendarProvider::new());
+    let err = RefreshState::new()
+        .run(&RefreshRequest {
+            calendar_name: "work",
+            provider: &failing,
+            remote_calendar: &primary(),
+            state: &store.inner,
+            clock: &clock,
+        })
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("list exploded"), "{err}");
+
+    // `state.save()` `?` arm.
+    let store = ErrStore {
+        inner: store.inner,
+        fail_load: false,
+        fail_save: true,
+        fail_journal: false,
+    };
+    let err = RefreshState::new()
+        .run(&RefreshRequest {
+            calendar_name: "work",
+            provider: &provider,
+            remote_calendar: &primary(),
+            state: &store,
+            clock: &clock,
+        })
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("save exploded"), "{err}");
+}
+
+#[tokio::test]
+async fn drift_propagates_list_failure() {
+    // `provider.list_events()` `?` arm in `DetectDrift::run`.
+    let provider = FakeCalendarProvider::new();
+    let store = MemoryStateStore::new();
+    let clock = clock();
+    let v1 = calendar(vec![Event::new("a", body("A"))]);
+    let p1 = plan(&v1, &provider, &store, &clock).await;
+    apply(&v1, &p1, &provider, &store, &clock, false, false).await;
+    let recorded = store.snapshot().calendars["work"].clone();
+
+    let failing = ListFailProvider(provider);
+    let err = DetectDrift::new()
+        .run(&DriftRequest {
+            calendar_name: "work",
+            recorded: &recorded,
+            provider: &failing,
+            remote_calendar: &primary(),
+        })
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("list exploded"), "{err}");
+}
+
 #[tokio::test]
 async fn provider_error_is_journaled_with_its_kind() {
     let provider = FakeCalendarProvider::new();
