@@ -9,3 +9,7 @@ target/
 
 # toolchain noise
 node_modules/
+
+# coverage artifacts
+*.profraw
+lcov.info
