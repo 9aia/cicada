@@ -1,0 +1,18 @@
+# Rust
+target/
+**/*.rs.bk
+
+# misc
+*.log
+.history_*.md
+.hook-cache/
+
+# toolchain noise
+node_modules/
+
+# coverage artifacts
+*.profraw
+lcov.info
+
+# myco worktree mount point (created by `myco init`)
+project/
