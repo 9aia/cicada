@@ -5,9 +5,13 @@
   "scripts": {
     "dev": "vitepress dev",
     "build": "vitepress build",
-    "preview": "vitepress preview"
+    "preview": "vitepress preview",
+    "docs:dev": "vitepress dev",
+    "docs:build": "vitepress build",
+    "docs:deploy": "bun run docs:build && bunx gh-pages -d .vitepress/dist"
   },
   "devDependencies": {
-    "vitepress": "^1.6.0"
+    "vitepress": "^1.6.0",
+    "gh-pages": "^6.3.0"
   }
 }
