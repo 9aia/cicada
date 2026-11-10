@@ -1,6 +1,11 @@
 //! cicada-shell sweep — time bounds, input resolution, backend
 //! selection/dispatch that e2e can't reach directly.
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::default_trait_access)]
+#![allow(
+    clippy::assert_is_empty,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::default_trait_access
+)]
 
 use std::fs;
 use std::path::Path;

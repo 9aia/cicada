@@ -1,6 +1,6 @@
 //! `GoogleAuthProvider` tests — OAuth refresh, service-account JWT
 //! exchange, token caching — all through `FixtureHttp`.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::assert_is_empty, clippy::unwrap_used, clippy::expect_used)]
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

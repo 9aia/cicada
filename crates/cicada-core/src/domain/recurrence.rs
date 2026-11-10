@@ -1091,7 +1091,7 @@ fn add_months(y: i16, m: i8, n: i64) -> (i16, i8) {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::assert_is_empty)]
 mod tests {
     use jiff::civil::date;
 
@@ -1859,7 +1859,7 @@ mod tests {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::assert_is_empty)]
 mod coverage_edge_tests {
     use super::*;
     use crate::domain::ids::ZoneId;
@@ -1953,7 +1953,7 @@ mod coverage_edge_tests {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::assert_is_empty)]
 mod rrule_edge_tests {
     use super::*;
 

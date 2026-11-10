@@ -1,0 +1,3 @@
+# Driver state + fake-provider backend are runtime artifacts, not
+# package content.
+cicada-state/

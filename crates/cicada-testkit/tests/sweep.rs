@@ -8,7 +8,8 @@
     clippy::default_trait_access,
     clippy::items_after_statements,
     clippy::needless_pass_by_value,
-    clippy::unnecessary_get_then_check
+    clippy::unnecessary_get_then_check,
+    clippy::assert_is_empty
 )]
 
 use cicada_core::application::{

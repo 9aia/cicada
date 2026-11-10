@@ -572,7 +572,7 @@ fn secrets_dir_for(
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::assert_is_empty)]
 mod tests {
     use std::sync::Arc;
 

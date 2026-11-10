@@ -2,7 +2,7 @@
 //! full `cicada/plan-v1` JSON document, compared against the
 //! committed fixture. Frozen output — regenerate deliberately with
 //! `CICADA_BLESS=1` when the wire format legitimately changes.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::assert_is_empty)]
 
 use std::path::PathBuf;
 

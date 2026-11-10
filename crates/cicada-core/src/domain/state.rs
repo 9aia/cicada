@@ -192,7 +192,7 @@ pub enum JournalOutcome {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::assert_is_empty)]
 mod tests {
     use super::*;
 

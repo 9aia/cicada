@@ -1,0 +1,7 @@
+name: cicada-demo
+version: 0.1.0
+type: cicada
+description: >-
+  Demo cicada calendar package — installs through tamias and is
+  driven by tamias-driver-cicada (plan-only deploy; apply stays with
+  the cicada CLI).

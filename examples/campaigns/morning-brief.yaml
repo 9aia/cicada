@@ -1,0 +1,29 @@
+# morning-brief — a reference peregrin campaign composing cicada.
+#
+# `driver: schedule` fires `brief.due` on a cron; `driver: shell`
+# runs the cicada verb an operator would run and maps rc → event
+# type. Load with `peregrin campaign run morning-brief.yaml` (or a
+# bundle's `campaign serve`); requires `cicada` on PATH and a
+# cicada.yaml checkout as cwd (params.cwd).
+name: morning-brief
+
+nodes:
+  - id: brief
+    driver: schedule
+    on: [start]
+    emits: [brief.due]
+    params:
+      cron: "30 7 * * 1-5"
+      timezone: America/Sao_Paulo
+
+  - id: range
+    driver: shell
+    on: [brief.due]
+    emits: [brief.range.done, brief.range.failed]
+    params:
+      cmd: "cicada range --from today --to +1d"
+      cwd: "~/calendars"          # the cicada.yaml checkout
+      timeout: 60
+      emit:
+        "0": "brief.range.done"
+        default: "brief.range.failed"

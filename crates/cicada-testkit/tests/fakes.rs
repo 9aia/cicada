@@ -3,7 +3,7 @@
 //! creates; `MemoryStateStore`/`FakeClock` round-trip trivially.
 //! `PlanCalendar` gets its end-to-end here — core can't see the
 //! fakes (testkit depends on core, not vice versa).
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::assert_is_empty)]
 
 use cicada_core::application::{PlanCalendar, PlanRequest};
 use cicada_core::domain::calendar::Calendar;

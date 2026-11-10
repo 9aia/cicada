@@ -66,7 +66,7 @@ fn main() -> anyhow::Result<()> {
         Some("install") => {
             // Build every user-facing binary in release and copy it to
             // ~/.local/bin (idempotent, PATH-friendly names).
-            let bins = ["cicada", "cicada-mcp"];
+            let bins = ["cicada", "cicada-mcp", "tamias-driver-cicada"];
             for bin in bins {
                 run("cargo", &["build", "--release", "--bin", bin])?;
                 let src = format!("target/release/{bin}");

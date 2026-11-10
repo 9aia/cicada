@@ -1,7 +1,7 @@
 //! `FakeFileProvider` + `FakeCalendarProvider` coverage sweep:
 //! file-format errors, persist failure, the delegation arms, and
 //! `overlaps`' conservative-true fallbacks.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::assert_is_empty)]
 
 use std::fs;
 

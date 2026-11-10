@@ -4,7 +4,7 @@
 //! then inspect the recorded request stream — URLs, query params,
 //! `If-Match`, `Authorization`, JSON bodies — plus the parsed
 //! `RemoteEvent`s and the error taxonomy.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::assert_is_empty, clippy::unwrap_used, clippy::expect_used)]
 
 use std::sync::Arc;
 use std::time::Duration;

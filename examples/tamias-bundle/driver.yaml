@@ -1,0 +1,18 @@
+# tamias-driver-cicada --config example.
+#
+# `provider` selects the calendar backend: `google` is the default and
+# the real adapter (credentials via CICADA_GOOGLE_* env /
+# FileSecretStore); `fake` is the file-backed test/demo backend and
+# must be selected explicitly.
+provider: fake
+
+# stateDir holds state.yaml plus the driver's artifacts (driver.json,
+# plan.json). The default — .cicada/ inside the installed payload — is
+# evictable under tamias store GC, so durable deployments should point
+# this outside the payload. Relative paths resolve against this file's
+# directory.
+stateDir: ./cicada-state
+
+# fakeFile is the fake provider's backend JSON (provider: fake only).
+# It should move with stateDir for the same evictability reason.
+fakeFile: ./cicada-state/fake-provider.json

@@ -19,6 +19,7 @@ adapters into the same use cases.
 | `crates/cicada-google` | `CalendarProvider` + `AuthProvider` impls (Calendar API + Meet) |
 | `crates/cicada-mcp` | `cicada-mcp` binary — MCP stdio server, transport only |
 | `crates/cicada-cli` | `cicada` binary — init/validate/plan/apply/refresh/drift/range/show/fmt/mcp |
+| `crates/cicada-driver` | `tamias-driver-cicada` binary — tamias content driver for `type: cicada` packages (install validates, deploy plans, uninstall reports) |
 | `crates/cicada-testkit` | fake provider + state store, conformance suites, golden fixtures |
 
 ## Boundary

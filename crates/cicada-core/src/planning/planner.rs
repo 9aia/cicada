@@ -297,7 +297,7 @@ pub(crate) fn live_content_hash(local_id: &LocalId, body: &EventBody) -> Option<
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::assert_is_empty)]
 mod tests {
     use jiff::SignedDuration;
     use jiff::civil::date;

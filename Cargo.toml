@@ -11,6 +11,7 @@ license = "MIT"
 [workspace.dependencies]
 # Internal crates.
 cicada-core = { path = "crates/cicada-core" }
+cicada-driver = { path = "crates/cicada-driver" }
 cicada-schema = { path = "crates/cicada-schema" }
 cicada-state = { path = "crates/cicada-state" }
 cicada-google = { path = "crates/cicada-google" }

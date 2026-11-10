@@ -1,6 +1,6 @@
 //! `event_json` edge cases + secrets/http/retry bits the op tests
 //! don't reach.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::assert_is_empty, clippy::unwrap_used, clippy::expect_used)]
 
 use cicada_core::domain::attendee::ResponseStatus;
 use cicada_core::domain::event::{Conferencing, EventBody, EventTime, Transparency};

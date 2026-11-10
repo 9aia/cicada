@@ -135,6 +135,70 @@ The agent decides *when* — `events.range` plus free/busy queries expose
 gaps. cicada supplies the *how*: every mutation is a previewed,
 approved diff.
 
+### Distribution — tamias
+
+A cicada project *is* a tamias package: `tamias.yaml` with
+`type: cicada` wrapping `cicada.yaml` + `calendars/`. The
+`tamias-driver-cicada` binary (crate `cicada-driver`) is the content
+driver tamias dispatches lifecycle verbs to:
+
+| verb | what it does |
+| --- | --- |
+| `install` | validate manifest + calendars (schema + domain); nothing applied |
+| `deploy` | write `driver.json` + `plan.json` under the state dir — **plan-only**, never applies |
+| `uninstall` | drift/managed-inventory report; deletes no remote events |
+| `status` | recorded-state summary; no provider calls |
+| `config-schema` | JSON Schema of the optional `--config` file |
+
+`deploy` staying plan-only is deliberate: ADR-0002's confirmation
+gate means apply remains an explicit `cicada apply` (or MCP
+`plan.apply`) decision. Provenance — which ref/sha produced the
+desired state — is recorded by tamias itself.
+
+```sh
+cargo build -p cicada-driver          # → tamias-driver-cicada on PATH
+tamias install ./examples/tamias-bundle
+tamias deploy cicada-demo --config ./examples/tamias-bundle/driver.yaml
+tamias driver exec cicada-demo status --config ./examples/tamias-bundle/driver.yaml
+```
+
+See `examples/tamias-bundle/README.md` for the full walkthrough
+(`provider: fake` needs no credentials).
+
+### Orchestration — peregrin
+
+No dedicated driver: peregrin campaigns compose cicada through the
+existing `shell` and `schedule` drivers — the same verbs an operator
+runs, as campaign steps. `examples/campaigns/morning-brief.yaml` is
+a working reference:
+
+```yaml
+- id: brief
+  driver: schedule
+  on: [start]
+  emits: [brief.due]
+  params: { cron: "30 7 * * 1-5", timezone: America/Sao_Paulo }
+- id: range
+  driver: shell
+  on: [brief.due]
+  emits: [brief.range.done, brief.range.failed]
+  params:
+    cmd: "cicada range --from today --to +1d"
+    emit:
+      "0": "brief.range.done"
+      default: "brief.range.failed"
+```
+
+`driver: shell` runs `params.cmd` under the system shell; `params.emit`
+maps `rc` → event type (falling back to `cmd.done`/`node.failed`), so
+the campaign reads occurrences from the done event's `stdout`.
+
+Recurring drift-watch (`schedule` → `cicada drift` → notify on
+non-empty) and provision-on-event (`github-webhook` → `cicada
+plan`/`apply` for a team bundle) are the same shape. Calendar events
+as *triggers* (cicada → peregrin entity plane) is a possible
+follow-up; today `cicada-mcp` gives agents the same core directly.
+
 ### Providers and capabilities
 
 Google Calendar is the first provider; Google Meet is a conferencing capability

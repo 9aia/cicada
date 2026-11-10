@@ -2,7 +2,7 @@
 //! `ApplyPlan` → `DetectDrift`/`RefreshState`. Op-kind matrix,
 //! conflict gating, --force, tag-reconciled resume, per-op journal
 //! contents, and honest partial failure (ADR-0001 §4, ADR-0002 §3/§4).
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::assert_is_empty)]
 
 use cicada_core::application::{
     ApplyPlan, ApplyRequest, DetectDrift, DriftRequest, OpResult, PlanCalendar, PlanRequest,
