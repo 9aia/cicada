@@ -11,7 +11,13 @@ calendars too.
 
 The `cicada` command is a tamias pack (`libraries/cicada`) — a
 generated `bins[]` shim → `tamias-driver-cicada` → the engine lib.
-There is no cargo-installed `cicada` binary. From a checkout:
+There is no cargo-installed `cicada` binary. With `tamias` installed:
+
+```sh
+tamias install 9aia:cicada@0.0.0    # org registry (needs TAMIAS_REGISTRY_TOKEN)
+```
+
+From a checkout:
 
 ```sh
 cargo xtask pack                                  # stage the driver payload
