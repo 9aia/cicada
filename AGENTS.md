@@ -5,13 +5,17 @@ Calendars as code, in Rust — crates plus a `cicada` CLI and a
 against live providers the way you manage infrastructure. Agents are
 first-class users: `cicada-mcp` exposes the same core over MCP stdio.
 
-The `cicada` CLI is also a **generated surface** (org proposal P-021):
-`crates/cicada-cli` is the engine lib (`cicada::command()`/`run_from`),
-and `tamias-driver-cicada` derives an ops manifest from its clap tree —
-`cli.<verb>` wire queries over `serve`, plus feature-gated `cli`/`mcp`
-surface verbs. `cicada-mcp` stays: its `plan.preview`→`plan.apply`
-preview-digest gate is session state the generated ops→tools mapping
-can't express.
+The `cicada` CLI is also a **generated surface** (org proposal P-021)
+*and* a tamias `bins[]` pack (T-012): `crates/cicada-cli` is the
+engine lib (`cicada::command()`/`run_from`) with **no `[[bin]]`** —
+the `cicada` command ships as `libraries/cicada` (`bins:
+[{name: cicada, shim: cli, driver: cicada}]`), and
+`tamias-driver-cicada` derives an ops manifest from its clap tree —
+`cli.<verb>` wire queries over `serve`, the passthrough `cli` shim
+verb (strips `--dir`/`--name` → `cicada::run_from`, inherited stdio),
+plus feature-gated `mcp`. `cicada-mcp` stays: its
+`plan.preview`→`plan.apply` preview-digest gate is session state
+the generated ops→tools mapping can't express.
 
 ## Layout
 
@@ -26,8 +30,9 @@ adapters into the same use cases.
 | `crates/cicada-state` | `JsonFileStateStore` — recorded state + per-op apply journal |
 | `crates/cicada-google` | `CalendarProvider` + `AuthProvider` impls (Calendar API + Meet) |
 | `crates/cicada-mcp` | `cicada-mcp` binary — MCP stdio server, transport only (kept: digest-gated apply) |
-| `crates/cicada-cli` | `cicada` engine lib + `cicada` binary — init/validate/plan/apply/refresh/drift/range/show/fmt/mcp; `Cli`/`command()`/`dispatch`/`run_from` for drivers |
-| `crates/cicada-driver` | `tamias-driver-cicada` binary — dual-surface: tamias `type: cicada` content driver (install validates, deploy plans, uninstall reports) **and** pavo engine-ops driver (`manifest`/`capabilities`/`ops`/`run`/`serve`, `cli`/`mcp` features) |
+| `crates/cicada-cli` | `cicada` engine lib — init/validate/plan/apply/refresh/drift/range/show/fmt/mcp; `Cli`/`command()`/`dispatch`/`run_from` for drivers. **No `[[bin]]`**: the command ships as the tamias pack in `libraries/cicada/` (T-012); engine e2e tests live in `cicada-driver/tests/` and spawn `tamias-driver-cicada run` |
+| `crates/cicada-driver` | `tamias-driver-cicada` binary — triple surface: tamias `type: cicada` content driver (install validates, deploy plans, uninstall reports) **and** pavo engine-ops driver (`manifest`/`capabilities`/`ops`/`run`/`serve`, `cli` shim passthrough + feature-gated `mcp`) |
+| `libraries/cicada` | the tamias pack — `tamias.yaml` declares `bins: [{name: cicada, shim: cli, driver: cicada}]`; `cargo xtask pack` stages `drivers/bin/<triple>/tamias-driver-cicada` (gitignored) |
 | `crates/cicada-testkit` | fake provider + state store, conformance suites, golden fixtures |
 
 ## Boundary
@@ -43,7 +48,12 @@ implicit.
 ```bash
 cargo xtask check          # fmt + clippy -D warnings
 cargo xtask test           # whole suite (nextest if present)
-cargo xtask install        # release-build cicada + cicada-mcp → ~/.local/bin
+cargo xtask pack           # stage libraries/cicada driver payload
+                           # (release tamias-driver-cicada → drivers/bin/<triple>/)
+cargo xtask install        # release-build cicada-mcp + tamias-driver-cicada →
+                           # ~/.local/bin (the `cicada` command itself is the
+                           # tamias pack's generated bins[] shim — `cargo xtask
+                           # pack` + `tamias install --allow-drivers ./libraries/cicada`)
 cargo xtask coverage       # llvm-cov report (HTML → target/llvm-cov/html);
                            # extra args pass through, e.g. --fail-under-lines 100
 ```

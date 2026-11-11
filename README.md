@@ -9,11 +9,19 @@ calendars too.
 
 ## Install
 
+The `cicada` command is a tamias pack (`libraries/cicada`) — a
+generated `bins[]` shim → `tamias-driver-cicada` → the engine lib.
+There is no cargo-installed `cicada` binary. From a checkout:
+
 ```sh
-cargo install --git https://github.com/9aia/cicada cicada           # `cicada`
+cargo xtask pack                                  # stage the driver payload
+tamias install --allow-drivers ./libraries/cicada  # deploys `cicada`
 cargo install --git https://github.com/9aia/cicada cicada-mcp       # `cicada-mcp`
-cargo install --git https://github.com/9aia/cicada --features cli,mcp cicada-driver   # `tamias-driver-cicada`
 ```
+
+Or install the driver + MCP server to `~/.local/bin` with
+`cargo xtask install` (release builds; the `cicada` command itself
+still comes from the tamias pack).
 
 ## Quickstart
 
@@ -159,6 +167,8 @@ desired state — is recorded by tamias itself.
 ```sh
 cargo build -p cicada-driver          # → tamias-driver-cicada on PATH
 tamias install ./examples/tamias-bundle
+# …or install the `cicada` command itself from its own pack:
+cargo xtask pack && tamias install --allow-drivers ./libraries/cicada
 tamias deploy cicada-demo --config ./examples/tamias-bundle/driver.yaml
 tamias driver exec cicada-demo status --config ./examples/tamias-bundle/driver.yaml
 ```
@@ -231,12 +241,15 @@ crates/
   cicada-state/      JsonFileStateStore (GCS/S3 later via the same port)
   cicada-google/     CalendarProvider + AuthProvider impls
   cicada-mcp/        MCP server — same core, agent transport
-  cicada-cli/        `cicada` engine lib + binary; wires adapters into core use cases
+  cicada-cli/        `cicada` engine lib (no bin — the command is the
+                     libraries/cicada tamias pack's bins[] shim);
+                     wires adapters into core use cases
   cicada-driver/     tamias-driver-cicada — `type: cicada` content driver +
-                     pavo engine-ops driver (`ops`/`serve`/`run`; `cli`/`mcp`
-                     features generate CLI + MCP surfaces from the ops manifest)
+                     pavo engine-ops driver (`ops`/`serve`/`run`/`cli`;
+                     `cli` is the bins[] shim passthrough, `mcp`
+                     feature-gated)
   cicada-testkit/    fakes, conformance suites, golden fixtures
-xtask/               cargo xtask check|test|install
+xtask/               cargo xtask check|test|pack|install|coverage
 ```
 
 ## Status
@@ -270,7 +283,9 @@ Rust workspace, sepia-style conventions.
 ```sh
 cargo xtask check      # fmt + clippy -D warnings
 cargo xtask test       # whole suite (nextest if present)
-cargo xtask install    # release-build cicada + cicada-mcp → ~/.local/bin
+cargo xtask pack       # stage libraries/cicada driver payload
+                       # (release tamias-driver-cicada → drivers/bin/<triple>/)
+cargo xtask install    # release-build cicada-mcp + tamias-driver-cicada → ~/.local/bin
 ```
 
 ## Docs

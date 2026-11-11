@@ -16,3 +16,6 @@ lcov.info
 
 # myco worktree mount point (created by `myco init`)
 project/
+
+# tamias pack driver payload — build artifact (`cargo xtask pack`)
+/libraries/cicada/drivers/

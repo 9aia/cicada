@@ -1,0 +1,42 @@
+# cicada — the calendars-as-code engine as a tamias package (the
+# T-012 replication of the cuora P-023 pilot: a real product CLI
+# riding `bins[]`, no hand-rolled binary).
+#
+# `cargo xtask pack` release-builds `tamias-driver-cicada` into
+# `drivers/bin/<host-triple>/` (gitignored — a build artifact) and
+# this manifest ships it as a bundled driver. `tamias install
+# ./libraries/cicada` (or the packed `.tgz` / a registry ref)
+# registers the driver into `<tamias-home>/drivers/` and deploys the
+# `cicada` bin below by default.
+#
+# The `cicada` shim is a generated script → `tamias bin exec` →
+# `tamias-driver-cicada cli --dir <pkg> --name cicada <argv>` → the
+# cicada engine lib's `run_from` in-process with inherited stdio.
+# That is full argv parity with the retired `cicada` binary:
+# `--help`/`--version`, every bounded verb (init/validate/plan/
+# apply/refresh/drift/range/show/fmt), and the unbounded surfaces —
+# `cicada mcp` (the digest-gated cicada-mcp server) and the
+# interactive `provider.add` credential flow — all stream
+# end-to-end. No `tools/bin/` payload bin: the surfaces are verbs,
+# not second binaries — they ride the same shim. `cicada-mcp`
+# itself stays a real binary (stateful planDigest gate).
+#
+# NOTE: this pack is the *command* surface. The calendar bundles
+# (`type: cicada`, e.g. `examples/tamias-bundle`) are a different
+# thing — content packs the same driver consumes via its tamias
+# content-type verbs (`install`/`deploy`/`uninstall`/`status`/
+# `config-schema`). Installing this pack does not deploy a
+# calendar.
+name: cicada
+version: "0.0.0"
+type: files
+description: >-
+  Calendars as code — declare calendars in YAML, plan/apply/drift
+  against live providers like infrastructure. Every verb rides the
+  tamias-driver-cicada engine passthrough; `cicada mcp` is the
+  agent-facing MCP stdio surface.
+
+bins:
+  - name: cicada
+    shim: cli
+    driver: cicada

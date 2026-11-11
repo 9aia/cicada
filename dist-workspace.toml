@@ -5,10 +5,15 @@ members = ["cargo:."]
 [dist]
 # The preferred dist version to use in CI (Cargo.toml SemVer syntax)
 cargo-dist-version = "0.33.0"
-# CI backends to support
-ci = "none"
-# The installers to generate for each app
-installers = ["shell"]
+# CI backends to support — none: releases are operator-driven
+# (`dist build`), no release CI.
+ci = []
+# The installers to generate for each app — none: the `cicada`
+# binary is retired (T-012); the command ships as the
+# libraries/cicada tamias pack's bins[] shim over
+# tamias-driver-cicada. `cicada-mcp`/`tamias-driver-cicada`
+# install via `cargo xtask install` / `cargo install --git`.
+installers = []
 # Target platforms to build apps for (Rust target-triple syntax)
 # host arch only; other targets join via remote workers (TODO)
 targets = ["x86_64-unknown-linux-gnu"]
