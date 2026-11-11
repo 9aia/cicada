@@ -69,18 +69,18 @@ fn main() -> anyhow::Result<()> {
             // copy them to ~/.local/bin (idempotent, PATH-friendly
             // names). There is no `cicada` cargo bin — the command
             // ships as the tamias pack (`cargo xtask pack` + `tamias
-            // install ./libraries/cicada`); `cicada-mcp` stays a real
-            // binary (stateful planDigest gate) and the driver serves
-            // both the `type: cicada` content verbs and the `cli`
-            // bins[] shim passthrough.
-            let bins = ["cicada-mcp", "tamias-driver-cicada"];
+            // install ./libraries/cicada`); `tamias-driver-cicada`
+            // serves both the `type: cicada` content verbs and the
+            // `cli` bins[] shim passthrough (plus the `mcp`
+            // ops→tools surface — cicada-mcp was deleted in T-019).
+            let bins = ["tamias-driver-cicada"];
             for bin in bins {
                 run("cargo", &["build", "--release", "--bin", bin])?;
                 let src = format!("{}/release/{bin}", target_dir()?.display());
                 let dst = format!("{}/.local/bin/{bin}", std::env::var("HOME")?);
                 std::fs::copy(&src, &dst)?;
             }
-            println!("installed cicada-mcp + tamias-driver-cicada to ~/.local/bin");
+            println!("installed tamias-driver-cicada to ~/.local/bin");
             println!("install the cicada command (generated bins[] shim):");
             println!("  cargo xtask pack && tamias install --allow-drivers ./libraries/cicada");
         }

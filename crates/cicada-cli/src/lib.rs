@@ -7,15 +7,22 @@
 //! [`run_from`] in-process with inherited stdio.
 //!
 //! `cicada` — calendars as code. Wires adapters into cicada-core use
-//! cases: init, validate, plan, apply, refresh, drift, range, show,
-//! fmt, provider add, mcp.
+//! cases: init, validate, list, plan, apply, refresh, drift, range,
+//! show, fmt, provider add. The preview→apply `planDigest` gate
+//! lives here too (T-019): `plan` issues a digest persisted beside
+//! the state file, `apply --plan-digest` enforces it — the contract
+//! cicada-mcp used to hold in session state, now reachable through
+//! the generated ops surface (`cli.plan`/`cli.apply`) and any MCP
+//! rendering of it.
 
 #![forbid(unsafe_code)]
 
 mod apply;
+mod digest;
 mod drift;
 mod fmt;
 mod init;
+mod list;
 mod logging;
 mod plan;
 mod provider;
@@ -54,9 +61,17 @@ enum Commands {
     /// current directory and validates every calendar it lists. A
     /// `kind: Manifest` file passed explicitly expands the same way.
     Validate(ValidateArgs),
-    /// Diff desired vs recorded vs live into an ordered plan.
+    /// List the declared calendars: bindings plus declared/recorded
+    /// event counts.
+    List(ListArgs),
+    /// Diff desired vs recorded vs live into an ordered plan — and
+    /// issue the `planDigest` `apply --plan-digest` requires.
     Plan(PlanArgs),
     /// Reconcile: execute the plan against the provider.
+    ///
+    /// `--plan-digest <sha256:…>` applies only the exact plan a
+    /// `cicada plan` run previewed — the digest is consumed on use
+    /// and counts as the confirmation (no prompt).
     Apply(ApplyArgs),
     /// Pull live state into recorded state.
     Refresh(RefreshArgs),
@@ -70,8 +85,6 @@ enum Commands {
     Fmt(FmtArgs),
     /// Manage provider registrations (`provider add google`).
     Provider(ProviderArgs),
-    /// Serve MCP over stdio — the same core, for agents (ADR-0001 §8a).
-    Mcp(cicada_mcp::ServerOptions),
 }
 
 /// `cicada init`.
@@ -90,6 +103,22 @@ struct ValidateArgs {
     /// Calendar or manifest YAML files. Defaults to the `cicada.yaml`
     /// manifest in the current directory.
     files: Vec<PathBuf>,
+}
+
+/// `cicada list`.
+#[derive(Debug, Args)]
+struct ListArgs {
+    /// Calendar or manifest YAML files. Defaults to the `cicada.yaml`
+    /// manifest in the current directory.
+    files: Vec<PathBuf>,
+    /// Provider name used for calendars without `provider:` (fake |
+    /// google; default fake).
+    #[arg(long)]
+    provider: Option<String>,
+    /// Recorded-state file (default `.cicada/state.yaml`; also
+    /// `CICADA_STATE`).
+    #[arg(long)]
+    state: Option<PathBuf>,
 }
 
 /// `cicada plan`.
@@ -113,6 +142,10 @@ struct PlanArgs {
     /// more than one calendar is planned.
     #[arg(long)]
     out: Option<PathBuf>,
+    /// Attendee notifications: none | externalOnly | all — must match
+    /// the choice `apply` uses or the plan digest goes stale.
+    #[arg(long)]
+    notify: Option<String>,
 }
 
 /// `cicada apply`.
@@ -145,6 +178,13 @@ struct ApplyArgs {
     /// Attendee notifications: none | externalOnly | all.
     #[arg(long)]
     notify: Option<String>,
+    /// Apply only the plan this digest previewed (printed by
+    /// `cicada plan` as `planDigest sha256:…`). The digest must have
+    /// been issued and not spent, and the re-planned digest must
+    /// match — anything changed since preview refuses as stale.
+    /// Providing it is the confirmation: the prompt is skipped.
+    #[arg(long, value_name = "DIGEST")]
+    plan_digest: Option<String>,
 }
 
 /// `cicada refresh`.
@@ -183,6 +223,9 @@ struct RangeArgs {
     /// Calendar or manifest YAML files. Defaults to the `cicada.yaml`
     /// manifest in the current directory.
     files: Vec<PathBuf>,
+    /// Limit to one declared calendar name; default all.
+    #[arg(long)]
+    calendar: Option<String>,
     /// Range start (`today`, `+Nd`, a date, or a datetime).
     #[arg(long)]
     from: Option<String>,
@@ -322,6 +365,7 @@ pub fn dispatch(cli: &Cli) -> ExitCode {
             ExitCode::SUCCESS
         }
         Some(Commands::Validate(args)) => validate::run(&args.files),
+        Some(Commands::List(args)) => list::run(args),
         Some(Commands::Plan(args)) => plan::run(args),
         Some(Commands::Range(args)) => range::run(args),
         Some(Commands::Show(args)) => show::run(args),
@@ -331,7 +375,6 @@ pub fn dispatch(cli: &Cli) -> ExitCode {
         Some(Commands::Init(args)) => init::run(args),
         Some(Commands::Fmt(args)) => fmt::run(args),
         Some(Commands::Provider(args)) => provider::run(&args.command),
-        Some(Commands::Mcp(opts)) => cicada_mcp::run_stdio(opts),
     }
 }
 

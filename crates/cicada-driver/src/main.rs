@@ -18,8 +18,8 @@
 //!
 //! - `ops` — the ops manifest: every bounded `cicada` verb as a
 //!   `cli.<verb>` wire query, derived from the engine's own clap
-//!   tree (`cicada::command`). Unbounded/host-interactive verbs
-//!   (`mcp`, `provider.add`) are `surfaces`, never ops.
+//!   tree (`cicada::command`). Host-interactive verbs
+//!   (`provider.add`) are `surfaces`, never ops.
 //! - `run <argv>` — engine passthrough: `tamias-driver-cicada run
 //!   plan` ≡ `cicada plan`. Also the child side of `cli.*` wire
 //!   queries (`engine_ops::run_verb` re-execs this same verb so
@@ -31,15 +31,18 @@
 //! rest runs through `cicada::run_from` in-process with inherited
 //! stdio — full engine parity a generated ops→CLI surface can't
 //! express: `--help`/`--version`, globals before the verb, and the
-//! unbounded `mcp`/`provider.add` surfaces all behave exactly like
-//! the retired `cicada` binary.
+//! interactive `provider.add` credential flow all behave exactly
+//! like the retired `cicada` binary.
 //!
-//! Optional surface: feature `mcp` embeds pavo-driver-kit's
-//! surface layer — `mcp` serves the ops manifest as MCP tools on
-//! stdio (the engine's own `cicada mcp` verb is the digest-gated
-//! cicada-mcp server; this is the ops→tools rendering). There is
-//! no `cli` feature: `cli` is the shim verb above, not a generated
-//! surface — the engine's own argv grammar is the contract.
+//! Surface (feature `mcp`, default on since T-019 deleted
+//! cicada-mcp): pavo-driver-kit's surface layer — `mcp` serves the
+//! ops manifest as MCP tools on stdio, the ops→tools rendering of
+//! the same `cli.*` queries `serve` answers. The engine's
+//! preview→digest→apply gate rides those ops (`plan` issues a
+//! persisted `planDigest`; `apply --plan-digest` enforces it), so
+//! no session state is needed. There is no `cli` feature: `cli` is
+//! the shim verb above, not a generated surface — the engine's own
+//! argv grammar is the contract.
 //!
 //! **tamias content-type driver** (`type: cicada` packages — tamias
 //! always passes `--dir <payload> --name <pkg> [--config <f>]`, so
@@ -104,20 +107,21 @@ fn main() {
         // driver flags and hand the rest to `cicada::run_from`
         // with inherited stdio. That keeps full engine parity a
         // generated ops→CLI surface can't express: `--help`/
-        // `--version`, the unbounded `mcp` stdio server, and the
-        // interactive `provider.add` credential flow all behave
-        // exactly like the retired `cicada` binary.
+        // `--version` and the interactive `provider.add`
+        // credential flow all behave exactly like the retired
+        // `cicada` binary.
         Some("cli") => {
             let argv = engine_argv(&args[1..]);
             cicada::run_from(argv)
         }
-        // Optional embedded surface (feature-gated): the
+        // Embedded surface (feature `mcp`, default on): the
         // pavo-driver-kit surface layer renders this driver's own
         // ops manifest as MCP tools over stdio — the ops→tools
         // rendering of the same `cli.*` queries `serve` answers.
-        // (The engine's `cicada mcp` verb — the digest-gated
-        // cicada-mcp server — is a different surface, reached
-        // through `run`/`cli`, never this verb.)
+        // This replaced cicada-mcp in T-019: the preview→digest→
+        // apply gate now lives engine-side (`plan` issues a
+        // persisted `planDigest`; `apply --plan-digest` enforces
+        // it), so the ops carry the whole contract.
         #[cfg(feature = "mcp")]
         Some("mcp") => {
             let m = kit::surface::OpsManifest::from_value(&drv::engine_ops::manifest())

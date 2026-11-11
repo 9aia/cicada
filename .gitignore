@@ -19,3 +19,6 @@ project/
 
 # tamias pack driver payload — build artifact (`cargo xtask pack`)
 /libraries/cicada/drivers/
+
+# cicada runtime state (state.yaml, plan-digest, fake-provider.json, locks)
+**/.cicada/

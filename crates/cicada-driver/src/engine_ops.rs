@@ -12,19 +12,22 @@
 //! typed params (`arg`/`opt`/`flag`), doc strings ride along
 //! unchanged.
 //!
-//! cicada has two verbs that can never be request/response ops —
-//! they ride `surfaces` (argv passthrough / generated-surface
+//! cicada has one verb that can never be a request/response op —
+//! it rides `surfaces` (argv passthrough / generated-surface
 //! subcommands with inherited stdio) instead:
 //!
-//! - `mcp` — the unbounded ndjson MCP stdio loop; it never
-//!   returns. (Kept alongside the generated `mcp` surface: see
-//!   AGENTS.md — cicada-mcp's preview→digest→apply gate is
-//!   session state the generated tools can't express.)
 //! - `provider.add` — the OAuth/service-account credential flow:
 //!   it reads the auth code from stdin or waits on a loopback
 //!   listener plus a browser prompt. A wire op child
 //!   (`Command::output`) has no usable stdin/tty, so the
 //!   interactive path can only ever fail as an op.
+//!
+//! (The old `mcp` surface is gone with cicada-mcp — T-019 moved the
+//! preview→digest→apply gate engine-side: `plan` issues a
+//! `planDigest` persisted beside the state file and `apply
+//! --plan-digest` enforces it, so the gate rides ordinary `cli.*`
+//! ops. The driver's own `mcp` verb — feature `mcp`, on by default —
+//! renders this ops manifest as MCP tools, the agent surface.)
 //!
 //! `mutates` is honest: `init` scaffolds files, `plan` can write
 //! `--out`, `apply`/`refresh`/`fmt` rewrite state, remote events,
@@ -40,10 +43,11 @@ use clap::{Arg, ArgAction, Command};
 use pavo_protocol::wire::{QueryResult, Response};
 use serde_json::{Map, Value, json};
 
-/// Unbounded/host-interactive surfaces — verbs that never return
-/// (`mcp`) or need inherited stdin/tty/browser (`provider.add`,
-/// see module docs). They can never be request/response ops.
-const SURFACES: &[&str] = &["mcp", "provider.add"];
+/// Unbounded/host-interactive surfaces — verbs that need inherited
+/// stdin/tty/browser (`provider.add`, see module docs). They can
+/// never be request/response ops. (cicada-mcp's `mcp` verb was
+/// deleted in T-019 — the digest gate moved engine-side.)
+const SURFACES: &[&str] = &["provider.add"];
 
 /// Params excluded from ops — flags that turn a bounded verb into
 /// a stream, or params that must never ride argv. None today:
@@ -303,7 +307,7 @@ mod tests {
     fn op_of_accepts_cli_prefix_only() {
         assert_eq!(op_of("cli.validate").unwrap(), "validate");
         assert_eq!(op_of("cli.plan").unwrap(), "plan");
-        assert!(op_of("cli.mcp").is_none()); // unbounded surface
+        assert!(op_of("cli.mcp").is_none()); // deleted with cicada-mcp (T-019)
         assert!(op_of("cli.provider.add").is_none()); // interactive surface
         assert!(op_of("cli.provider").is_none()); // group, not a leaf
         assert!(op_of("validate").is_none()); // view query, not an op

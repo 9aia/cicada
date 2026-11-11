@@ -21,6 +21,7 @@ use cicada_core::ports::clock::SystemClock;
 use cicada_state::JsonFileStateStore;
 
 use crate::ApplyArgs;
+use crate::digest;
 use crate::plan::print_plan;
 use cicada_shell::backend;
 use cicada_shell::input;
@@ -158,12 +159,46 @@ pub(crate) fn run(args: &ApplyArgs) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
+    // The preview→apply gate (T-019 — the contract cicada-mcp held
+    // in session state): `--plan-digest` must name a digest `plan`
+    // issued and hasn't spent, and the plan staged under the lock
+    // must re-derive to it — YAML, live, recorded, or `--notify`
+    // drift since preview is stale and refuses. A verified digest
+    // is consumed (a second apply must re-preview) and *is* the
+    // confirmation, so the prompt is skipped.
+    let plan_digest = args
+        .plan_digest
+        .as_deref()
+        .map(str::trim)
+        .filter(|d| !d.is_empty());
+    if let Some(expected) = plan_digest {
+        if !digest::is_issued(&state_path, expected) {
+            eprintln!(
+                "cicada apply: unknown planDigest {expected:?} — run `cicada plan` \
+                 first and pass the digest it prints"
+            );
+            return ExitCode::FAILURE;
+        }
+        let plan_refs: Vec<&cicada_core::planning::Plan> = staged.iter().map(|s| &s.plan).collect();
+        let fresh = digest::plans_digest(&plan_refs);
+        if fresh != expected {
+            eprintln!(
+                "cicada apply: stale planDigest — desired, live, or recorded state \
+                 changed since this preview was issued (expected {expected}, \
+                 re-planned to {fresh}). Run `cicada plan` again and apply the \
+                 new digest."
+            );
+            return ExitCode::FAILURE;
+        }
+        digest::consume(&state_path, expected);
+    }
+
     let remote_ops: usize = staged.iter().map(|s| s.plan.remote_op_count()).sum();
     if remote_ops == 0 {
         println!("apply: nothing to do — recorded state already matches desired");
         return ExitCode::SUCCESS;
     }
-    if !args.auto_approve && !confirm(remote_ops, staged.len()) {
+    if plan_digest.is_none() && !args.auto_approve && !confirm(remote_ops, staged.len()) {
         eprintln!("cicada apply: aborted");
         return ExitCode::FAILURE;
     }

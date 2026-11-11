@@ -1,7 +1,7 @@
 //! Second e2e sweep — show detail variants, plan findings/diffs,
-//! apply abort paths, live range/shape edge cases, `cicada mcp`,
-//! and google `from_env` branches driven through `--provider
-//! google` on the engine passthrough.
+//! apply abort paths, live range/shape edge cases, the driver's
+//! `mcp` ops→tools surface, and google `from_env` branches driven
+//! through `--provider google` on the engine passthrough.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -9,7 +9,7 @@
 )]
 
 use std::fs;
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
@@ -437,32 +437,68 @@ fn init_scaffold_errors() {
     assert!(dir2.path().join("calendars/work.yaml").exists());
 }
 
-// ---------- mcp passthrough ----------
+// ---------- mcp surface (driver verb — ops manifest → tools) ----------
 
 #[test]
-fn cicada_mcp_serves_stdio() {
+fn driver_mcp_serves_ops_as_tools() {
     let dir = tempfile::tempdir().unwrap();
     fixture(
         dir.path(),
         "apiVersion: cicada/v1\nkind: Calendar\nmetadata: {name: work, timeZone: UTC, provider: fake, calendarId: primary}\nspec: {events: []}\n",
     );
-    let mut child = cicada_cmd()
-        .args(["mcp"])
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tamias-driver-cicada"))
+        .arg("mcp")
         .current_dir(dir.path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    child
-        .stdin
-        .as_mut()
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    writeln!(
+        stdin,
+        "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{}}}}"
+    )
+    .unwrap();
+    writeln!(
+        stdin,
+        "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}}"
+    )
+    .unwrap();
+    stdin.flush().unwrap();
+    drop(stdin); // EOF ends the serve loop
+
+    let mut line = String::new();
+    stdout.read_line(&mut line).unwrap();
+    let init: serde_json::Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(init["result"]["serverInfo"]["name"], "cicada");
+
+    line.clear();
+    stdout.read_line(&mut line).unwrap();
+    let tools: serde_json::Value = serde_json::from_str(&line).unwrap();
+    let names: Vec<&str> = tools["result"]["tools"]
+        .as_array()
         .unwrap()
-        .write_all(br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}"#.as_slice())
-        .unwrap();
-    drop(child.stdin.take());
+        .iter()
+        .filter_map(|t| t["name"].as_str())
+        .collect();
+    // Every bounded engine verb is a tool — including the gated
+    // write path (`plan` issues the digest, `apply` consumes it).
+    for expected in [
+        "init", "validate", "list", "plan", "apply", "refresh", "drift", "range", "show", "fmt",
+    ] {
+        assert!(names.contains(&expected), "missing tool {expected}");
+    }
+    // `provider.add` is a surface, never a tool.
+    assert!(!names.contains(&"provider.add"));
+
     let out = child.wait_with_output().unwrap();
-    assert!(stdout(&out).contains("serverInfo"), "{}", stdout(&out));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 // ---------- google from_env branches via the real binary ----------

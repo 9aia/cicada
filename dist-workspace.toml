@@ -11,8 +11,9 @@ ci = []
 # The installers to generate for each app — none: the `cicada`
 # binary is retired (T-012); the command ships as the
 # libraries/cicada tamias pack's bins[] shim over
-# tamias-driver-cicada. `cicada-mcp`/`tamias-driver-cicada`
-# install via `cargo xtask install` / `cargo install --git`.
+# tamias-driver-cicada (cicada-mcp was deleted in T-019 — the
+# digest gate is engine-side), which installs via `cargo xtask
+# install` / `cargo install --git`.
 installers = []
 # Target platforms to build apps for (Rust target-triple syntax)
 # host arch only; other targets join via remote workers (TODO)

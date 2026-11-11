@@ -13,13 +13,15 @@
 # `tamias-driver-cicada cli --dir <pkg> --name cicada <argv>` → the
 # cicada engine lib's `run_from` in-process with inherited stdio.
 # That is full argv parity with the retired `cicada` binary:
-# `--help`/`--version`, every bounded verb (init/validate/plan/
-# apply/refresh/drift/range/show/fmt), and the unbounded surfaces —
-# `cicada mcp` (the digest-gated cicada-mcp server) and the
-# interactive `provider.add` credential flow — all stream
-# end-to-end. No `tools/bin/` payload bin: the surfaces are verbs,
-# not second binaries — they ride the same shim. `cicada-mcp`
-# itself stays a real binary (stateful planDigest gate).
+# `--help`/`--version`, every bounded verb (init/validate/list/
+# plan/apply/refresh/drift/range/show/fmt), and the interactive
+# `provider.add` credential flow — all stream end-to-end. No
+# `tools/bin/` payload bin: the surfaces are verbs, not second
+# binaries — they ride the same shim. (T-019 deleted cicada-mcp:
+# the planDigest gate moved engine-side — `plan` issues a digest
+# persisted beside the state file, `apply --plan-digest` enforces
+# it — and the driver's `mcp` verb renders the ops manifest as MCP
+# tools, the agent surface.)
 #
 # NOTE: this pack is the *command* surface. The calendar bundles
 # (`type: cicada`, e.g. `examples/tamias-bundle`) are a different
@@ -33,8 +35,8 @@ type: files
 description: >-
   Calendars as code — declare calendars in YAML, plan/apply/drift
   against live providers like infrastructure. Every verb rides the
-  tamias-driver-cicada engine passthrough; `cicada mcp` is the
-  agent-facing MCP stdio surface.
+  tamias-driver-cicada engine passthrough; the driver's `mcp` verb
+  is the agent-facing MCP surface (ops manifest → tools).
 
 bins:
   - name: cicada

@@ -13,14 +13,14 @@ name = "tamias-driver-cicada"
 path = "src/main.rs"
 
 [features]
-# Embedded surface (pavo-driver-kit's surface layer) — optional,
-# acyclic: the driver gains an `mcp` argv verb that serves its own
-# ops manifest as MCP tools. There is no `cli` feature: `cli` is
-# the tamias `bins[]` shim passthrough verb (always on — it runs
-# the engine's own argv grammar, which a generated surface can't
-# express). default = ops driver + `run`/`cli` passthroughs + the
-# tamias content-type verbs only.
-default = []
+# Embedded surface (pavo-driver-kit's surface layer) — the driver
+# gains an `mcp` argv verb that serves its own ops manifest as MCP
+# tools; default-on since T-019 deleted cicada-mcp — this is now the
+# agent surface (the planDigest gate rides `cli.plan`/`cli.apply`
+# ops). There is no `cli` feature: `cli` is the tamias `bins[]`
+# shim passthrough verb (always on — it runs the engine's own argv
+# grammar, which a generated surface can't express).
+default = ["mcp"]
 mcp = ["pavo-driver-kit/mcp"]
 
 [dependencies]

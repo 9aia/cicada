@@ -2,7 +2,7 @@
 //! manifest discovery, `kind: Manifest` expansion, and
 //! read+parse-in-one-shot loading. `cicada validate` keeps its own
 //! per-file reporting path (it must survive individual failures);
-//! `plan`/`range`/`show`/the MCP tools fail fast — a partial desired
+//! `plan`/`range`/`show`/`list` fail fast — a partial desired
 //! state plans the wrong reconciliation.
 
 use std::fs;

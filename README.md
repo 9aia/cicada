@@ -22,10 +22,9 @@ From a checkout:
 ```sh
 cargo xtask pack                                  # stage the driver payload
 tamias install --allow-drivers ./libraries/cicada  # deploys `cicada`
-cargo install --git https://github.com/9aia/cicada cicada-mcp       # `cicada-mcp`
 ```
 
-Or install the driver + MCP server to `~/.local/bin` with
+Or install the driver to `~/.local/bin` with
 `cargo xtask install` (release builds; the `cicada` command itself
 still comes from the tamias pack).
 
@@ -66,7 +65,7 @@ spec:
 cicada range --from today --to +7d
 cicada show standup
 cicada fmt --check
-cicada mcp       # serve MCP over stdio — same core, for agents
+tamias-driver-cicada mcp  # serve the ops manifest as MCP tools — same core, for agents
 ```
 
 ## Why
@@ -111,7 +110,7 @@ Ports (traits)                 CalendarProvider · StateStore · AuthProvider ·
 The core is pure — zero dependencies on providers, files, or platform
 specifics. Use cases depend only on port traits. Every provider, state backend,
 auth method, and interface is an adapter. The same core powers `cicada` (the
-CLI) and `cicada-mcp` (the agent interface).
+CLI) and `tamias-driver-cicada`'s `mcp` verb (the agent interface — ops manifest → MCP tools).
 
 ### Plan / Apply / Drift
 
@@ -130,9 +129,12 @@ ops after a crash.
 
 ### MCP for agents
 
-`cicada-mcp` (or `cicada mcp`) serves the same use cases over MCP stdio —
-agents read, plan, and reconcile through the identical core the CLI uses.
-MCP is a day-one interface, not a bolt-on.
+`tamias-driver-cicada mcp` serves the engine's ops manifest as MCP tools over
+stdio — agents read, plan, and reconcile through the identical core the CLI
+uses (`cli.<verb>` ops in `serve`, or `tools/call` here). MCP is a day-one
+interface, not a bolt-on. The preview→apply gate is engine-side: `plan`
+issues a `planDigest` persisted beside the state file and `apply
+--plan-digest` enforces it — no session state required.
 
 What that means in practice:
 
@@ -214,7 +216,7 @@ Recurring drift-watch (`schedule` → `cicada drift` → notify on
 non-empty) and provision-on-event (`github-webhook` → `cicada
 plan`/`apply` for a team bundle) are the same shape. Calendar events
 as *triggers* (cicada → peregrin entity plane) is a possible
-follow-up; today `cicada-mcp` gives agents the same core directly.
+follow-up; today the driver's `mcp` surface gives agents the same core directly.
 
 ### Providers and capabilities
 
@@ -246,14 +248,13 @@ crates/
   cicada-schema/     serde schema + DSL parser (YAML -> domain)
   cicada-state/      JsonFileStateStore (GCS/S3 later via the same port)
   cicada-google/     CalendarProvider + AuthProvider impls
-  cicada-mcp/        MCP server — same core, agent transport
   cicada-cli/        `cicada` engine lib (no bin — the command is the
                      libraries/cicada tamias pack's bins[] shim);
                      wires adapters into core use cases
   cicada-driver/     tamias-driver-cicada — `type: cicada` content driver +
                      pavo engine-ops driver (`ops`/`serve`/`run`/`cli`;
                      `cli` is the bins[] shim passthrough, `mcp`
-                     feature-gated)
+                     the ops→tools agent surface)
   cicada-testkit/    fakes, conformance suites, golden fixtures
 xtask/               cargo xtask check|test|pack|install|coverage
 ```
@@ -263,8 +264,9 @@ xtask/               cargo xtask check|test|pack|install|coverage
 v0.1 feature-complete. Everything works end-to-end against the
 file-backed `fake` provider (`--provider fake`, the default):
 `init` → `validate` → `plan` → `apply` → `drift`/`refresh` →
-`range`/`show` → `fmt`, plus `cicada mcp` serving the same use cases
-over stdio with a confirmation-gated `plan.apply`.
+`range`/`show` → `fmt`/`list`, plus `tamias-driver-cicada mcp` serving the
+same use cases over stdio; `apply --plan-digest` is the
+confirmation-gated write path.
 
 Google Calendar is implemented (auth: service-account JWT, OAuth
 installed app, static token; Calendar API v3 + Meet; etag
@@ -291,7 +293,7 @@ cargo xtask check      # fmt + clippy -D warnings
 cargo xtask test       # whole suite (nextest if present)
 cargo xtask pack       # stage libraries/cicada driver payload
                        # (release tamias-driver-cicada → drivers/bin/<triple>/)
-cargo xtask install    # release-build cicada-mcp + tamias-driver-cicada → ~/.local/bin
+cargo xtask install    # release-build tamias-driver-cicada → ~/.local/bin
 ```
 
 ## Docs

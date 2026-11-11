@@ -1,4 +1,5 @@
-//! `from`/`to` bound parsing for `range`/`show` and the MCP tools:
+//! `from`/`to` bound parsing for `range`/`show` and the ops
+//! surfaces:
 //! `today`, `+Nd`, `+Nw`, ISO dates, civil datetimes, and RFC 3339
 //! instants — resolved against a calendar's time zone so bounds mean
 //! what the user means locally.

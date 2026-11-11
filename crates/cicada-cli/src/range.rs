@@ -34,6 +34,13 @@ pub(crate) fn run(args: &RangeArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    let calendars = match select(&calendars, args.calendar.as_deref()) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("cicada range: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
     let window = match window(args.from.as_deref(), args.to.as_deref(), &zone) {
         Ok(w) => w,
         Err(e) => {
@@ -43,7 +50,7 @@ pub(crate) fn run(args: &RangeArgs) -> ExitCode {
     };
 
     let mut failed = false;
-    for cal in &calendars {
+    for cal in calendars {
         println!("{}:", cal.name);
         match QueryRange::new().expand(cal.events.values(), window) {
             Ok(occs) if occs.is_empty() => println!("  (no occurrences in range)"),
@@ -89,6 +96,28 @@ fn load_and_zone(
     Ok((calendars, zone))
 }
 
+/// `--calendar` filter — one declared calendar by name, or all.
+/// Unknown names fail (same contract the MCP `calendar` param had).
+fn select<'a>(
+    calendars: &'a [cicada_core::domain::calendar::Calendar],
+    only: Option<&str>,
+) -> Result<Vec<&'a cicada_core::domain::calendar::Calendar>, String> {
+    match only {
+        None => Ok(calendars.iter().collect()),
+        Some(name) => {
+            if let Some(cal) = calendars.iter().find(|c| c.name == name) {
+                Ok(vec![cal])
+            } else {
+                let known: Vec<&str> = calendars.iter().map(|c| c.name.as_str()).collect();
+                Err(format!(
+                    "unknown calendar {name:?} — declared: {}",
+                    known.join(", ")
+                ))
+            }
+        }
+    }
+}
+
 /// `--from`/`--to` with defaults → a validated [`TimeRange`].
 fn window(from: Option<&str>, to: Option<&str>, zone: &ZoneId) -> Result<TimeRange, String> {
     let start = parse_bound(from.unwrap_or(DEFAULT_FROM), zone)?;
@@ -110,6 +139,13 @@ fn run_live(args: &RangeArgs) -> ExitCode {
     };
     let (calendars, zone) = match load_and_zone(&args.files) {
         Ok(v) => v,
+        Err(e) => {
+            eprintln!("cicada range: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let calendars = match select(&calendars, args.calendar.as_deref()) {
+        Ok(c) => c,
         Err(e) => {
             eprintln!("cicada range: {e}");
             return ExitCode::FAILURE;
@@ -139,7 +175,7 @@ fn run_live(args: &RangeArgs) -> ExitCode {
         .unwrap_or_else(|_| cicada_core::domain::state::RecordedState::new());
 
     let mut failed = false;
-    for cal in &calendars {
+    for cal in calendars {
         let remote = backend::remote_calendar(cal, state.calendar(&cal.name));
         let occurrences = runtime
             .block_on(provider.list_events(&remote, Some(window)))

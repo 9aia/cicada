@@ -37,7 +37,7 @@ const PROVIDERS: [&str; 2] = ["fake", "google"];
 
 /// Validate a `--provider` value: `fake` (default) or `google`;
 /// anything else is unknown. `who` labels the error (`cicada plan`,
-/// `cicada-mcp`, …).
+/// `cicada-mcp`, `cicada list`, …).
 pub fn provider_name(name: Option<&str>, who: &str) -> Result<String, String> {
     match name.unwrap_or("fake") {
         "fake" => Ok("fake".to_owned()),
@@ -237,8 +237,8 @@ pub fn fake_provider(
 }
 
 /// A current-thread runtime — all port calls are `block_on`-driven.
-/// For one-shot verbs; the MCP server runs its own long-lived
-/// runtime instead.
+/// For one-shot verbs; long-lived servers (the driver's `serve`,
+/// the ops→MCP surface) run their own runtime instead.
 pub fn runtime(who: &str) -> Result<tokio::runtime::Runtime, String> {
     // A current-thread runtime build can't fail — the error arm is
     // compiled out under coverage.

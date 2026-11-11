@@ -69,6 +69,7 @@ fn ops_manifest_covers_bounded_verbs() {
     for expected in [
         "cli.init",
         "cli.validate",
+        "cli.list",
         "cli.plan",
         "cli.apply",
         "cli.refresh",
@@ -79,10 +80,11 @@ fn ops_manifest_covers_bounded_verbs() {
     ] {
         assert!(queries.contains(&expected), "missing {expected}");
     }
-    // surfaces — never ops
+    // surfaces — never ops (cicada-mcp's `mcp` verb was deleted in
+    // T-019; the digest gate rides cli.plan/cli.apply)
     assert!(!queries.contains(&"cli.mcp"));
     assert!(!queries.contains(&"cli.provider.add"));
-    assert_eq!(m["surfaces"], serde_json::json!(["mcp", "provider.add"]));
+    assert_eq!(m["surfaces"], serde_json::json!(["provider.add"]));
     // mutates honesty
     let apply = ops.iter().find(|o| o["query"] == "cli.apply").unwrap();
     assert_eq!(apply["mutates"], true);

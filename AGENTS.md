@@ -1,9 +1,10 @@
 # Cicada
 
-Calendars as code, in Rust — crates plus a `cicada` CLI and a
-`cicada-mcp` server. Declare calendars in YAML, then plan/apply/drift
-against live providers the way you manage infrastructure. Agents are
-first-class users: `cicada-mcp` exposes the same core over MCP stdio.
+Calendars as code, in Rust — crates plus a `cicada` CLI. Declare
+calendars in YAML, then plan/apply/drift against live providers the
+way you manage infrastructure. Agents are first-class users:
+`tamias-driver-cicada mcp` exposes the same core over MCP stdio (the
+ops manifest rendered as tools — T-019 deleted `cicada-mcp`).
 
 The `cicada` CLI is also a **generated surface** (org proposal P-021)
 *and* a tamias `bins[]` pack (T-012): `crates/cicada-cli` is the
@@ -13,14 +14,15 @@ the `cicada` command ships as `libraries/cicada` (`bins:
 `tamias-driver-cicada` derives an ops manifest from its clap tree —
 `cli.<verb>` wire queries over `serve`, the passthrough `cli` shim
 verb (strips `--dir`/`--name` → `cicada::run_from`, inherited stdio),
-plus feature-gated `mcp`. `cicada-mcp` stays: its
-`plan.preview`→`plan.apply` preview-digest gate is session state
-the generated ops→tools mapping can't express.
+plus the `mcp` ops→tools surface (default feature — the agent
+interface). The preview→apply `planDigest` gate lives engine-side
+(T-019): `plan` issues a digest persisted beside the state file,
+`apply --plan-digest` enforces it — it rides ordinary `cli.*` ops.
 
 ## Layout
 
 Ports-and-adapters. `cicada-core` is pure domain (no I/O); adapters
-depend on it; `cicada-cli` and `cicada-mcp` are thin shells that wire
+depend on it; `cicada-cli` and `cicada-driver` are thin shells that wire
 adapters into the same use cases.
 
 | Crate | Role |
@@ -29,9 +31,8 @@ adapters into the same use cases.
 | `crates/cicada-schema` | serde schema + YAML DSL parser (`apiVersion: cicada/v1`) → domain |
 | `crates/cicada-state` | `JsonFileStateStore` — recorded state + per-op apply journal |
 | `crates/cicada-google` | `CalendarProvider` + `AuthProvider` impls (Calendar API + Meet) |
-| `crates/cicada-mcp` | `cicada-mcp` binary — MCP stdio server, transport only (kept: digest-gated apply) |
-| `crates/cicada-cli` | `cicada` engine lib — init/validate/plan/apply/refresh/drift/range/show/fmt/mcp; `Cli`/`command()`/`dispatch`/`run_from` for drivers. **No `[[bin]]`**: the command ships as the tamias pack in `libraries/cicada/` (T-012); engine e2e tests live in `cicada-driver/tests/` and spawn `tamias-driver-cicada run` |
-| `crates/cicada-driver` | `tamias-driver-cicada` binary — triple surface: tamias `type: cicada` content driver (install validates, deploy plans, uninstall reports) **and** pavo engine-ops driver (`manifest`/`capabilities`/`ops`/`run`/`serve`, `cli` shim passthrough + feature-gated `mcp`) |
+| `crates/cicada-cli` | `cicada` engine lib — init/validate/list/plan/apply/refresh/drift/range/show/fmt; `Cli`/`command()`/`dispatch`/`run_from` for drivers. **No `[[bin]]`**: the command ships as the tamias pack in `libraries/cicada/` (T-012); engine e2e tests live in `cicada-driver/tests/` and spawn `tamias-driver-cicada run` |
+| `crates/cicada-driver` | `tamias-driver-cicada` binary — triple surface: tamias `type: cicada` content driver (install validates, deploy plans, uninstall reports) **and** pavo engine-ops driver (`manifest`/`capabilities`/`ops`/`run`/`serve`, `cli` shim passthrough + `mcp` ops→tools surface) |
 | `libraries/cicada` | the tamias pack — `tamias.yaml` declares `bins: [{name: cicada, shim: cli, driver: cicada}]`; `cargo xtask pack` stages `drivers/bin/<triple>/tamias-driver-cicada` (gitignored) |
 | `crates/cicada-testkit` | fake provider + state store, conformance suites, golden fixtures |
 
@@ -40,8 +41,9 @@ adapters into the same use cases.
 cicada owns the desired-state lifecycle — declare, plan, apply, drift.
 Anything an agent or human does to a calendar goes through use cases in
 `cicada-core`; interfaces (CLI flags, MCP tools) contain no business
-logic. Mutating MCP tools are confirmation-gated — `plan.apply` is never
-implicit.
+logic. Mutating surfaces are confirmation-gated — `apply
+--plan-digest` is never implicit (the digest proves a `plan` preview
+happened and hasn't gone stale).
 
 ## Commands
 
@@ -50,7 +52,7 @@ cargo xtask check          # fmt + clippy -D warnings
 cargo xtask test           # whole suite (nextest if present)
 cargo xtask pack           # stage libraries/cicada driver payload
                            # (release tamias-driver-cicada → drivers/bin/<triple>/)
-cargo xtask install        # release-build cicada-mcp + tamias-driver-cicada →
+cargo xtask install        # release-build tamias-driver-cicada →
                            # ~/.local/bin (the `cicada` command itself is the
                            # tamias pack's generated bins[] shim — `cargo xtask
                            # pack` + `tamias install --allow-drivers ./libraries/cicada`)

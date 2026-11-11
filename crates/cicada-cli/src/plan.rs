@@ -1,5 +1,8 @@
 //! `cicada plan` — desired vs recorded vs live → a printed plan plus
-//! an optional `cicada/plan-v1` JSON document (ADR-0002 §11).
+//! an optional `cicada/plan-v1` JSON document (ADR-0002 §11). Every
+//! run issues a `planDigest` (persisted beside the state file) that
+//! `cicada apply --plan-digest` requires — the preview→apply gate
+//! cicada-mcp used to hold in session state (T-019).
 //!
 //! Provider selection: `--provider fake` (the default) plans against
 //! the file-backed [`FakeFileProvider`]; `--provider google` plans
@@ -15,12 +18,14 @@ use std::process::ExitCode;
 
 use cicada_core::application::{PlanCalendar, PlanRequest};
 use cicada_core::domain::operation::{EventDiff, OpKind, Operation};
+use cicada_core::domain::policy::SendUpdates;
 use cicada_core::domain::time::Time;
 use cicada_core::planning::{Plan, Severity};
 use cicada_core::ports::clock::SystemClock;
 use cicada_state::JsonFileStateStore;
 
 use crate::PlanArgs;
+use crate::digest;
 use cicada_shell::backend;
 use cicada_shell::input;
 
@@ -31,6 +36,13 @@ pub(crate) fn run(args: &PlanArgs) -> ExitCode {
         Ok(n) => n,
         Err(e) => {
             eprintln!("{e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let notify = match args.notify.as_deref().map(SendUpdates::parse).transpose() {
+        Ok(n) => n,
+        Err(e) => {
+            eprintln!("cicada plan: --notify: {e}");
             return ExitCode::FAILURE;
         }
     };
@@ -84,7 +96,7 @@ pub(crate) fn run(args: &PlanArgs) -> ExitCode {
             provider: &provider,
             remote_calendar: &remote,
             clock: &clock,
-            send_updates: cal.send_updates,
+            send_updates: notify.unwrap_or(cal.send_updates),
         };
         match runtime.block_on(PlanCalendar::new().run(&req)) {
             Ok(plan) => {
@@ -93,6 +105,31 @@ pub(crate) fn run(args: &PlanArgs) -> ExitCode {
             }
             Err(e) => {
                 eprintln!("cicada plan {}: {e}", cal.name);
+                failed = true;
+            }
+        }
+    }
+
+    // Issue the preview digest — `apply --plan-digest` only runs
+    // against a digest a plan produced (T-019; the gate cicada-mcp
+    // used to hold in session state). Persisted beside the state
+    // file so the gate survives process boundaries; the advisory
+    // lock keeps the read-modify-write of the digest file from
+    // racing a concurrent apply's consume.
+    if !plans.is_empty() {
+        let plan_refs: Vec<&Plan> = plans.iter().collect();
+        let digest = digest::plans_digest(&plan_refs);
+        // Best-effort lock — a lock failure still prints the digest;
+        // apply refuses it as unissued rather than blocking the
+        // preview.
+        let _guard = store.lock().ok();
+        match digest::issue(&state_path, &digest) {
+            Ok(()) => println!("planDigest {digest}"),
+            Err(e) => {
+                eprintln!(
+                    "cicada plan: cannot persist plan digest at {}: {e}",
+                    digest::digest_path(&state_path).display()
+                );
                 failed = true;
             }
         }

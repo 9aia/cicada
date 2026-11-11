@@ -14,13 +14,15 @@
 //! `{"op":"query","query":"ops"}` answers it;
 //! `query:"cli.<verb>"` re-execs `run` in a captured child and
 //! returns `{op, argv, code, stdout, stderr}`. Unbounded /
-//! host-interactive verbs (`mcp`, `provider.add`) ride `surfaces`.
+//! host-interactive verbs (`provider.add`) ride `surfaces`.
 //! This driver ships no views — `view`/`query` names outside
 //! `ops`/`cli.*` answer `ok:false`.
 //!
-//! Optional surface: feature `mcp` embeds pavo-driver-kit's
-//! surface layer — `mcp` serves the ops manifest as MCP tools on
-//! stdio. `cli` is not a feature: it's the `bins[]` shim
+//! Surface: feature `mcp` (default on since T-019 deleted
+//! cicada-mcp) embeds pavo-driver-kit's surface layer — `mcp`
+//! serves the ops manifest as MCP tools on stdio; the
+//! preview→digest→apply gate rides the `cli.plan`/`cli.apply` ops
+//! themselves. `cli` is not a feature: it's the `bins[]` shim
 //! passthrough verb in `main.rs`, always on.
 
 pub mod config;
