@@ -63,16 +63,26 @@ fn main() -> anyhow::Result<()> {
             let status = Command::new("cargo").args(cmd).status()?;
             anyhow::ensure!(status.success(), "workspace tests failed");
         }
+        Some("pack") => pack()?,
         Some("install") => {
-            // Build every user-facing binary in release and copy it to
-            // ~/.local/bin (idempotent, PATH-friendly names).
-            let bins = ["cicada", "cicada-mcp", "tamias-driver-cicada"];
+            // Build the remaining user-facing binaries in release and
+            // copy them to ~/.local/bin (idempotent, PATH-friendly
+            // names). There is no `cicada` cargo bin — the command
+            // ships as the tamias pack (`cargo xtask pack` + `tamias
+            // install ./libraries/cicada`); `cicada-mcp` stays a real
+            // binary (stateful planDigest gate) and the driver serves
+            // both the `type: cicada` content verbs and the `cli`
+            // bins[] shim passthrough.
+            let bins = ["cicada-mcp", "tamias-driver-cicada"];
             for bin in bins {
                 run("cargo", &["build", "--release", "--bin", bin])?;
-                let src = format!("target/release/{bin}");
+                let src = format!("{}/release/{bin}", target_dir()?.display());
                 let dst = format!("{}/.local/bin/{bin}", std::env::var("HOME")?);
                 std::fs::copy(&src, &dst)?;
             }
+            println!("installed cicada-mcp + tamias-driver-cicada to ~/.local/bin");
+            println!("install the cicada command (generated bins[] shim):");
+            println!("  cargo xtask pack && tamias install --allow-drivers ./libraries/cicada");
         }
         // `cargo xtask coverage [llvm-cov args…]` — HTML report under
         // target/llvm-cov/html plus a printed summary. Extra args pass
@@ -119,9 +129,71 @@ fn main() -> anyhow::Result<()> {
             anyhow::ensure!(status.success(), "cargo {} failed", args.join(" "));
         }
         other => {
-            eprintln!("usage: cargo xtask <check|test|install|coverage> (got {other:?})");
+            eprintln!("usage: cargo xtask <check|test|pack|install|coverage> (got {other:?})");
             std::process::exit(2);
         }
     }
+    Ok(())
+}
+
+/// Captured stdout of a command — for probes like `rustc -vV`.
+fn run_out(args: &[&str]) -> Option<String> {
+    let (prog, rest) = args.split_first()?;
+    let out = Command::new(prog).args(rest).output().ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// The effective target dir — `cargo metadata` reports it, which
+/// keeps `pack`/`install` correct under a shared CARGO_TARGET_DIR
+/// (`target/release` relative to the workspace is stale).
+fn target_dir() -> anyhow::Result<std::path::PathBuf> {
+    let out = Command::new("cargo")
+        .args(["metadata", "--no-deps", "--format-version", "1"])
+        .output()?;
+    let meta: serde_json::Value = serde_json::from_slice(&out.stdout)?;
+    meta.get("target_directory")
+        .and_then(|v| v.as_str())
+        .map(std::path::PathBuf::from)
+        .ok_or_else(|| anyhow::anyhow!("cargo metadata: no target_directory"))
+}
+
+/// The host target triple — the `drivers/bin/<triple>/` selector
+/// tamias uses for compiled driver payloads.
+fn host_triple() -> String {
+    run_out(&["rustc", "-vV"])
+        .and_then(|v| {
+            v.lines()
+                .find_map(|l| l.strip_prefix("host: ").map(str::to_string))
+        })
+        .unwrap_or_else(|| "x86_64-unknown-linux-gnu".to_string())
+}
+
+/// `cargo xtask pack` — stage the tamias pack payload (T-012):
+/// release-build `tamias-driver-cicada` and drop it under
+/// `libraries/cicada/drivers/bin/<host-triple>/` — the
+/// bundled-driver dir `tamias install` registers into
+/// `<tamias-home>/drivers/`. Gitignored on purpose: the binary is a
+/// build artifact; the committed pack is just `tamias.yaml` + this
+/// staging verb.
+fn pack() -> anyhow::Result<()> {
+    run("cargo", &["build", "--release", "-p", "cicada-driver"])?;
+    let triple = host_triple();
+    let dest_dir = std::path::PathBuf::from("libraries/cicada/drivers/bin").join(&triple);
+    std::fs::create_dir_all(&dest_dir)?;
+    let src = target_dir()?.join("release/tamias-driver-cicada");
+    let dest = dest_dir.join("tamias-driver-cicada");
+    std::fs::copy(&src, &dest)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755));
+    }
+    println!("pack staged: {}", dest.display());
+    println!();
+    println!("install the cicada command (generated bins[] shim):");
+    println!("  tamias install --allow-drivers ./libraries/cicada");
+    println!("  # or a pinned tarball: tamias bundle pack libraries/cicada");
     Ok(())
 }

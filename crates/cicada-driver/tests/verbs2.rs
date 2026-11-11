@@ -1,7 +1,7 @@
 //! Second e2e sweep — show detail variants, plan findings/diffs,
 //! apply abort paths, live range/shape edge cases, `cicada mcp`,
 //! and google `from_env` branches driven through `--provider
-//! google` on the real binary.
+//! google` on the engine passthrough.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -21,16 +21,22 @@ fn fixture(dir: &Path, calendar: &str) {
     fs::write(dir.join("calendars/work.yaml"), calendar).unwrap();
 }
 
+/// `tamias-driver-cicada run` — the engine passthrough the `cicada`
+/// bins[] shim uses; argv[0] is the driver's own, `run` hands the
+/// rest to `cicada::run_from` exactly like the `cli` shim verb does
+/// after stripping `--dir`/`--name`.
+fn cicada_cmd() -> Command {
+    let mut c = Command::new(env!("CARGO_BIN_EXE_tamias-driver-cicada"));
+    c.arg("run");
+    c
+}
+
 fn cicada(dir: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_cicada"))
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .unwrap()
+    cicada_cmd().args(args).current_dir(dir).output().unwrap()
 }
 
 fn cicada_stdin(dir: &Path, args: &[&str], input: &[u8]) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_cicada"))
+    let mut child = cicada_cmd()
         .args(args)
         .current_dir(dir)
         .stdin(Stdio::piped())
@@ -440,7 +446,7 @@ fn cicada_mcp_serves_stdio() {
         dir.path(),
         "apiVersion: cicada/v1\nkind: Calendar\nmetadata: {name: work, timeZone: UTC, provider: fake, calendarId: primary}\nspec: {events: []}\n",
     );
-    let mut child = Command::new(env!("CARGO_BIN_EXE_cicada"))
+    let mut child = cicada_cmd()
         .args(["mcp"])
         .current_dir(dir.path())
         .stdin(Stdio::piped())
@@ -469,7 +475,7 @@ fn google_provider_env_branches() {
         "apiVersion: cicada/v1\nkind: Calendar\nmetadata: {name: work, timeZone: UTC, provider: fake, calendarId: primary}\nspec: {events: []}\n",
     );
     let run = |envs: &[(&str, &str)]| {
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_cicada"));
+        let mut cmd = cicada_cmd();
         cmd.args(["plan", "--provider", "google"])
             .current_dir(dir.path())
             .env_remove("CICADA_GOOGLE_SERVICE_ACCOUNT_JSON")
@@ -840,7 +846,7 @@ fn provider_add_service_account_set_failure() {
         r#"{"type":"service_account","client_email":"c@x.iam","private_key":"k"}"#,
     )
     .unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_cicada"))
+    let out = cicada_cmd()
         .args(["provider", "add", "google", "--service-account", "key.json"])
         .current_dir(dir.path())
         .env("CICADA_SECRETS_DIR", &blocker)
@@ -855,7 +861,7 @@ fn provider_add_oauth_error_paths() {
     let secrets = dir.path().join("secrets");
 
     // (a) --code mentions `code=` but yields none → extract_code's `?`.
-    let out = Command::new(env!("CARGO_BIN_EXE_cicada"))
+    let out = cicada_cmd()
         .args([
             "provider",
             "add",
@@ -878,7 +884,7 @@ fn provider_add_oauth_error_paths() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     drop(listener); // nothing accepts — connection refused.
-    let out = Command::new(env!("CARGO_BIN_EXE_cicada"))
+    let out = cicada_cmd()
         .args([
             "provider",
             "add",
@@ -902,7 +908,7 @@ fn provider_add_oauth_error_paths() {
 
     // (c) CICADA_GOOGLE_TOKEN_URL unset → the TOKEN_URL fallback
     // closure runs; a dead proxy keeps it off the real endpoint.
-    let out = Command::new(env!("CARGO_BIN_EXE_cicada"))
+    let out = cicada_cmd()
         .args([
             "provider",
             "add",
@@ -930,7 +936,7 @@ fn provider_add_oauth_read_code_failure() {
     // at EOF — read_code errors out through the `?` in add_oauth.
     let dir = tempfile::tempdir().unwrap();
     let secrets = dir.path().join("secrets");
-    let mut child = Command::new(env!("CARGO_BIN_EXE_cicada"))
+    let mut child = cicada_cmd()
         .args([
             "provider",
             "add",
@@ -995,7 +1001,7 @@ fn provider_add_oauth_set_failure_after_exchange() {
         );
         stream.write_all(resp.as_bytes()).unwrap();
     });
-    let out = Command::new(env!("CARGO_BIN_EXE_cicada"))
+    let out = cicada_cmd()
         .args([
             "provider",
             "add",
@@ -1041,7 +1047,7 @@ fn provider_add_oauth_pasted_code() {
     });
     // No --code → stdin drives `read_code`: an empty line is skipped,
     // then the pasted code is captured.
-    let mut child = Command::new(env!("CARGO_BIN_EXE_cicada"))
+    let mut child = cicada_cmd()
         .args([
             "provider",
             "add",
@@ -1086,7 +1092,7 @@ fn google_from_env_service_account_paths() {
     let dir = tempfile::tempdir().unwrap();
     fixture(dir.path(), SIMPLE_CAL);
     let run = |envs: &[(&str, &str)]| {
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_cicada"));
+        let mut cmd = cicada_cmd();
         cmd.args(["plan", "--provider", "google"])
             .current_dir(dir.path())
             .env_remove("CICADA_GOOGLE_SERVICE_ACCOUNT_JSON")

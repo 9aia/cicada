@@ -1,9 +1,10 @@
 //! cicada — the engine as a library. Everything that used to live
 //! in the binary lives here: [`Cli`]/`Commands`, verb dispatch.
-//! `run()` is the compat CLI's whole body; drivers (the `cicada`
-//! bin, tamias-driver-cicada's `run`/ops surfaces) split it into
-//! [`parse`]/[`parse_from`] + [`dispatch`] — argv in, exit code
-//! out.
+//! [`parse`]/[`parse_from`] + [`dispatch`] are the split drivers
+//! consume — argv in, exit code out. There is no `[[bin]]`: the
+//! `cicada` command ships as the tamias pack in `libraries/cicada/`
+//! (T-012) — a `bins[]` shim → `tamias-driver-cicada cli` →
+//! [`run_from`] in-process with inherited stdio.
 //!
 //! `cicada` — calendars as code. Wires adapters into cicada-core use
 //! cases: init, validate, plan, apply, refresh, drift, range, show,

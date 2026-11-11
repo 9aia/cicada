@@ -18,15 +18,14 @@
 //! This driver ships no views — `view`/`query` names outside
 //! `ops`/`cli.*` answer `ok:false`.
 //!
-//! Optional surfaces: features `cli`/`mcp` embed
-//! pavo-driver-kit's surface layer — `cli <op> [args]` is a
-//! generated CLI over the ops manifest (`mcp`/`provider.add` ride
-//! as streaming subcommands), `mcp` serves the ops as MCP tools
-//! on stdio.
+//! Optional surface: feature `mcp` embeds pavo-driver-kit's
+//! surface layer — `mcp` serves the ops manifest as MCP tools on
+//! stdio. `cli` is not a feature: it's the `bins[]` shim
+//! passthrough verb in `main.rs`, always on.
 
 pub mod config;
 pub mod engine_ops;
-#[cfg(any(feature = "cli", feature = "mcp"))]
+#[cfg(feature = "mcp")]
 pub mod surface;
 mod tamias;
 pub mod verbs;
@@ -86,12 +85,9 @@ pub fn capabilities_value() -> Value {
             verbs.push(json!(extra));
         }
     }
-    // Feature-gated embedded surfaces — advertised only when the
-    // binary actually answers them.
-    #[cfg(feature = "cli")]
-    if !verbs.iter().any(|x| x.as_str() == Some("cli")) {
-        verbs.push(json!("cli"));
-    }
+    // Feature-gated embedded surface — advertised only when the
+    // binary actually answers it. (`cli` is the always-on bins[]
+    // shim passthrough, not an advertised surface verb.)
     #[cfg(feature = "mcp")]
     if !verbs.iter().any(|x| x.as_str() == Some("mcp")) {
         verbs.push(json!("mcp"));

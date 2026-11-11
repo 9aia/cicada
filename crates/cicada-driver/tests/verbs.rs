@@ -51,8 +51,18 @@ fn fixture(dir: &Path, calendar: &str) {
     fs::write(dir.join("calendars/work.yaml"), calendar).unwrap();
 }
 
+/// `tamias-driver-cicada run` — the engine passthrough the `cicada`
+/// bins[] shim uses; argv[0] is the driver's own, `run` hands the
+/// rest to `cicada::run_from` exactly like the `cli` shim verb does
+/// after stripping `--dir`/`--name`.
+fn cicada_cmd() -> Command {
+    let mut c = Command::new(env!("CARGO_BIN_EXE_tamias-driver-cicada"));
+    c.arg("run");
+    c
+}
+
 fn cicada(dir: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_cicada"))
+    cicada_cmd()
         .args(args)
         .current_dir(dir)
         .output()
@@ -60,7 +70,7 @@ fn cicada(dir: &Path, args: &[&str]) -> Output {
 }
 
 fn cicada_stdin(dir: &Path, args: &[&str], input: &str) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_cicada"))
+    let mut child = cicada_cmd()
         .args(args)
         .current_dir(dir)
         .stdin(Stdio::piped())
@@ -711,7 +721,7 @@ fn provider_add_unknown_and_oauth_missing_creds() {
     let out = cicada(dir.path(), &["provider", "add", "bogus"]);
     assert!(!out.status.success());
     // google without client id → clear error.
-    let out = Command::new(env!("CARGO_BIN_EXE_cicada"))
+    let out = cicada_cmd()
         .args(["provider", "add", "google"])
         .current_dir(dir.path())
         .env_remove("CICADA_GOOGLE_CLIENT_ID")
@@ -734,7 +744,7 @@ fn provider_add_service_account_validates_and_persists() {
     let dir = tempfile::tempdir().unwrap();
     let secrets = dir.path().join("secrets");
     // Missing file.
-    let out = Command::new(env!("CARGO_BIN_EXE_cicada"))
+    let out = cicada_cmd()
         .args([
             "provider",
             "add",
@@ -749,7 +759,7 @@ fn provider_add_service_account_validates_and_persists() {
     assert!(!out.status.success());
     // Malformed key JSON.
     fs::write(dir.path().join("key.json"), "{}").unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_cicada"))
+    let out = cicada_cmd()
         .args(["provider", "add", "google", "--service-account", "key.json"])
         .current_dir(dir.path())
         .env("CICADA_SECRETS_DIR", &secrets)
@@ -762,7 +772,7 @@ fn provider_add_service_account_validates_and_persists() {
         r#"{"type":"other","client_email":"cicada@x.iam","private_key":"-----BEGIN PRIVATE KEY-----\nMIIB\n-----END PRIVATE KEY-----\n"}"#,
     )
     .unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_cicada"))
+    let out = cicada_cmd()
         .args(["provider", "add", "google", "--service-account", "key.json"])
         .current_dir(dir.path())
         .env("CICADA_SECRETS_DIR", &secrets)
@@ -802,7 +812,7 @@ fn provider_add_oauth_code_exchange() {
         stream.write_all(resp.as_bytes()).unwrap();
     });
     // --code skips the prompt; env token url points at the stub.
-    let out = Command::new(env!("CARGO_BIN_EXE_cicada"))
+    let out = cicada_cmd()
         .args([
             "provider",
             "add",
@@ -852,7 +862,7 @@ fn provider_add_oauth_no_refresh_token_errors() {
         stream.write_all(resp.as_bytes()).unwrap();
     });
     // A pasted redirect URL also exercises extract_code's URL arm.
-    let out = Command::new(env!("CARGO_BIN_EXE_cicada"))
+    let out = cicada_cmd()
         .args([
             "provider",
             "add",

@@ -8,9 +8,11 @@ repository.workspace = true
 license.workspace = true
 publish = false
 
-[[bin]]
-name = "cicada"
-path = "src/main.rs"
+# No [[bin]] — the `cicada` command ships as the tamias pack in
+# `libraries/cicada/` (T-012): a generated `bins[]` shim →
+# `tamias-driver-cicada cli` → `cicada::run_from` in-process.
+# Engine e2e tests live in `crates/cicada-driver/tests/` and spawn
+# `tamias-driver-cicada run`.
 
 [dependencies]
 cicada-core.workspace = true

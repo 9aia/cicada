@@ -43,8 +43,18 @@ fn fixture() -> tempfile::TempDir {
     dir
 }
 
+/// `tamias-driver-cicada run` — the engine passthrough the `cicada`
+/// bins[] shim uses; argv[0] is the driver's own, `run` hands the
+/// rest to `cicada::run_from` exactly like the `cli` shim verb does
+/// after stripping `--dir`/`--name`.
+fn cicada_cmd() -> Command {
+    let mut c = Command::new(env!("CARGO_BIN_EXE_tamias-driver-cicada"));
+    c.arg("run");
+    c
+}
+
 fn cicada(dir: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_cicada"))
+    cicada_cmd()
         .args(args)
         .current_dir(dir)
         .output()
@@ -136,7 +146,7 @@ fn full_lifecycle_apply_drift_refresh_plan() {
 fn apply_without_auto_approve_requires_confirmation() {
     let dir = fixture();
     // Answering "n" aborts and writes nothing.
-    let mut child = Command::new(env!("CARGO_BIN_EXE_cicada"))
+    let mut child = cicada_cmd()
         .args(["apply"])
         .current_dir(dir.path())
         .stdin(Stdio::piped())

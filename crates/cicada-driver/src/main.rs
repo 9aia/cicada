@@ -25,10 +25,21 @@
 //!   queries (`engine_ops::run_verb` re-execs this same verb so
 //!   engine output never touches the serve stream).
 //!
-//! Optional surfaces: features `cli`/`mcp` embed pavo-driver-kit's
-//! surface layer — `cli <op> [args]` is a generated CLI over the
-//! ops manifest (`mcp`/`provider.add` ride as streaming
-//! subcommands), `mcp` serves the ops as MCP tools on stdio.
+//! `cli <cicada argv>` is the tamias `bins[]` shim verb (T-012):
+//! `tamias bin exec` calls it with the standard `--dir`/`--name`
+//! driver flags ahead of the user's argv; they're stripped and the
+//! rest runs through `cicada::run_from` in-process with inherited
+//! stdio — full engine parity a generated ops→CLI surface can't
+//! express: `--help`/`--version`, globals before the verb, and the
+//! unbounded `mcp`/`provider.add` surfaces all behave exactly like
+//! the retired `cicada` binary.
+//!
+//! Optional surface: feature `mcp` embeds pavo-driver-kit's
+//! surface layer — `mcp` serves the ops manifest as MCP tools on
+//! stdio (the engine's own `cicada mcp` verb is the digest-gated
+//! cicada-mcp server; this is the ops→tools rendering). There is
+//! no `cli` feature: `cli` is the shim verb above, not a generated
+//! surface — the engine's own argv grammar is the contract.
 //!
 //! **tamias content-type driver** (`type: cicada` packages — tamias
 //! always passes `--dir <payload> --name <pkg> [--config <f>]`, so
@@ -53,7 +64,7 @@
 #![forbid(unsafe_code)]
 
 use cicada_driver as drv;
-#[cfg(any(feature = "cli", feature = "mcp"))]
+#[cfg(feature = "mcp")]
 use pavo_driver_kit as kit;
 
 fn main() {
@@ -85,20 +96,28 @@ fn main() {
         Some("run") => cicada::run_from(
             std::iter::once("cicada".to_string()).chain(args.iter().skip(1).cloned()),
         ),
-        // Embedded surface verbs (feature-gated, optional): the
-        // pavo-driver-kit surface layer renders this driver's own
-        // ops manifest — `cli` = generated clap CLI (op →
-        // subcommand, `mcp`/`provider.add` stream), `mcp` = ops →
-        // MCP tools over stdio.
-        #[cfg(feature = "cli")]
+        // The tamias `bins[]` shim verb (T-012): `tamias bin exec`
+        // runs `<driver> cli --dir <payload> --name <pkg> <cicada
+        // argv>` for a declared `shim: cli` bin in
+        // `libraries/cicada/tamias.yaml`. cicada's engine IS the
+        // CLI, so this is a passthrough — strip the two standard
+        // driver flags and hand the rest to `cicada::run_from`
+        // with inherited stdio. That keeps full engine parity a
+        // generated ops→CLI surface can't express: `--help`/
+        // `--version`, the unbounded `mcp` stdio server, and the
+        // interactive `provider.add` credential flow all behave
+        // exactly like the retired `cicada` binary.
         Some("cli") => {
-            let m = kit::surface::OpsManifest::from_value(&drv::engine_ops::manifest())
-                .unwrap_or_default();
-            let argv: Vec<String> = std::iter::once("cicada".to_string())
-                .chain(args.iter().skip(1).cloned())
-                .collect();
-            kit::surface::cli::run("cicada", &m, &argv, &mut drv::surface::Engine)
+            let argv = engine_argv(&args[1..]);
+            cicada::run_from(argv)
         }
+        // Optional embedded surface (feature-gated): the
+        // pavo-driver-kit surface layer renders this driver's own
+        // ops manifest as MCP tools over stdio — the ops→tools
+        // rendering of the same `cli.*` queries `serve` answers.
+        // (The engine's `cicada mcp` verb — the digest-gated
+        // cicada-mcp server — is a different surface, reached
+        // through `run`/`cli`, never this verb.)
         #[cfg(feature = "mcp")]
         Some("mcp") => {
             let m = kit::surface::OpsManifest::from_value(&drv::engine_ops::manifest())
@@ -120,4 +139,31 @@ fn main() {
         ),
     };
     std::process::exit(code);
+}
+
+/// `cli` verb argv (after the `cli` token) → engine argv (argv[0]
+/// included). `tamias bin exec`/`driver exec` prepend the standard
+/// driver flags — `--dir <payload>` `--name <pkg>` — which the
+/// engine doesn't know; consume the leading run of those two
+/// (`--flag v` and `--flag=v` forms) and pass everything else
+/// through untouched. `--config` is deliberately NOT stripped:
+/// cicada verbs resolve their own flags, so a user-passed one must
+/// reach the engine's parse.
+fn engine_argv(args: &[String]) -> Vec<String> {
+    let mut out = vec!["cicada".to_string()];
+    let mut i = 0;
+    while i < args.len() {
+        let a = args[i].as_str();
+        if a == "--dir" || a == "--name" {
+            // flag + separate value — skip both (a trailing flag
+            // with no value just ends the scan).
+            i = (i + 2).min(args.len());
+        } else if a.starts_with("--dir=") || a.starts_with("--name=") {
+            i += 1;
+        } else {
+            break;
+        }
+    }
+    out.extend(args[i..].iter().cloned());
+    out
 }
