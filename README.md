@@ -14,7 +14,7 @@ generated `bins[]` shim → `tamias-driver-cicada` → the engine lib.
 There is no cargo-installed `cicada` binary. With `tamias` installed:
 
 ```sh
-tamias install 9aia:cicada@0.0.0    # org registry (needs TAMIAS_REGISTRY_TOKEN)
+tamias install 9aia:cicada@0.1.0    # org registry (needs TAMIAS_REGISTRY_TOKEN)
 ```
 
 From a checkout:

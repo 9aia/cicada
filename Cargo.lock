@@ -203,7 +203,7 @@ dependencies = [
 
 [[package]]
 name = "cicada"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "cicada-core",
  "cicada-google",
@@ -223,7 +223,7 @@ dependencies = [
 
 [[package]]
 name = "cicada-core"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "jiff",
@@ -236,7 +236,7 @@ dependencies = [
 
 [[package]]
 name = "cicada-driver"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "cicada",
  "cicada-core",
@@ -256,7 +256,7 @@ dependencies = [
 
 [[package]]
 name = "cicada-google"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "cicada-core",
@@ -274,7 +274,7 @@ dependencies = [
 
 [[package]]
 name = "cicada-mcp"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "cicada-core",
  "cicada-schema",
@@ -295,7 +295,7 @@ dependencies = [
 
 [[package]]
 name = "cicada-schema"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "cicada-core",
  "jiff",
@@ -307,7 +307,7 @@ dependencies = [
 
 [[package]]
 name = "cicada-shell"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "cicada-core",
@@ -321,7 +321,7 @@ dependencies = [
 
 [[package]]
 name = "cicada-state"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "cicada-core",
@@ -334,7 +334,7 @@ dependencies = [
 
 [[package]]
 name = "cicada-testkit"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "cicada-core",
@@ -2843,7 +2843,7 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 
 [[package]]
 name = "xtask"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "serde_json",
