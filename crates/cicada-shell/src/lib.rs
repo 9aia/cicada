@@ -1,7 +1,7 @@
 //! `cicada-shell` — the plumbing every user-facing interface shares.
 //!
 //! `cicada-core` is pure; adapters live in their own crates. Between
-//! them sit the interfaces (`cicada-cli`, `cicada-mcp`) — and between
+//! them sit the interfaces (`cicada`, `cicada-mcp`) — and between
 //! *those* lives this crate: manifest discovery and calendar loading
 //! ([`input`]), provider/state wiring ([`backend`]), and time-bound
 //! parsing ([`timeparse`]). Everything here is thin glue — the use

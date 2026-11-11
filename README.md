@@ -10,8 +10,9 @@ calendars too.
 ## Install
 
 ```sh
-cargo install --git https://github.com/9aia/cicada cicada-cli   # `cicada`
-cargo install --git https://github.com/9aia/cicada cicada-mcp   # `cicada-mcp`
+cargo install --git https://github.com/9aia/cicada cicada           # `cicada`
+cargo install --git https://github.com/9aia/cicada cicada-mcp       # `cicada-mcp`
+cargo install --git https://github.com/9aia/cicada --features cli,mcp cicada-driver   # `tamias-driver-cicada`
 ```
 
 ## Quickstart
@@ -230,7 +231,10 @@ crates/
   cicada-state/      JsonFileStateStore (GCS/S3 later via the same port)
   cicada-google/     CalendarProvider + AuthProvider impls
   cicada-mcp/        MCP server — same core, agent transport
-  cicada-cli/        commands; wires adapters into core use cases
+  cicada-cli/        `cicada` engine lib + binary; wires adapters into core use cases
+  cicada-driver/     tamias-driver-cicada — `type: cicada` content driver +
+                     pavo engine-ops driver (`ops`/`serve`/`run`; `cli`/`mcp`
+                     features generate CLI + MCP surfaces from the ops manifest)
   cicada-testkit/    fakes, conformance suites, golden fixtures
 xtask/               cargo xtask check|test|install
 ```

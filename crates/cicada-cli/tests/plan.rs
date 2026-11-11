@@ -8,7 +8,7 @@ use std::path::Path;
 use std::process::Command;
 
 /// The committed demo manifest (also used by hand: `cargo run -p
-/// cicada-cli -- plan` from that directory).
+/// cicada -- plan` from that directory).
 fn fixture() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
 }

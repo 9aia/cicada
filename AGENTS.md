@@ -5,6 +5,14 @@ Calendars as code, in Rust — crates plus a `cicada` CLI and a
 against live providers the way you manage infrastructure. Agents are
 first-class users: `cicada-mcp` exposes the same core over MCP stdio.
 
+The `cicada` CLI is also a **generated surface** (org proposal P-021):
+`crates/cicada-cli` is the engine lib (`cicada::command()`/`run_from`),
+and `tamias-driver-cicada` derives an ops manifest from its clap tree —
+`cli.<verb>` wire queries over `serve`, plus feature-gated `cli`/`mcp`
+surface verbs. `cicada-mcp` stays: its `plan.preview`→`plan.apply`
+preview-digest gate is session state the generated ops→tools mapping
+can't express.
+
 ## Layout
 
 Ports-and-adapters. `cicada-core` is pure domain (no I/O); adapters
@@ -17,9 +25,9 @@ adapters into the same use cases.
 | `crates/cicada-schema` | serde schema + YAML DSL parser (`apiVersion: cicada/v1`) → domain |
 | `crates/cicada-state` | `JsonFileStateStore` — recorded state + per-op apply journal |
 | `crates/cicada-google` | `CalendarProvider` + `AuthProvider` impls (Calendar API + Meet) |
-| `crates/cicada-mcp` | `cicada-mcp` binary — MCP stdio server, transport only |
-| `crates/cicada-cli` | `cicada` binary — init/validate/plan/apply/refresh/drift/range/show/fmt/mcp |
-| `crates/cicada-driver` | `tamias-driver-cicada` binary — tamias content driver for `type: cicada` packages (install validates, deploy plans, uninstall reports) |
+| `crates/cicada-mcp` | `cicada-mcp` binary — MCP stdio server, transport only (kept: digest-gated apply) |
+| `crates/cicada-cli` | `cicada` engine lib + `cicada` binary — init/validate/plan/apply/refresh/drift/range/show/fmt/mcp; `Cli`/`command()`/`dispatch`/`run_from` for drivers |
+| `crates/cicada-driver` | `tamias-driver-cicada` binary — dual-surface: tamias `type: cicada` content driver (install validates, deploy plans, uninstall reports) **and** pavo engine-ops driver (`manifest`/`capabilities`/`ops`/`run`/`serve`, `cli`/`mcp` features) |
 | `crates/cicada-testkit` | fake provider + state store, conformance suites, golden fixtures |
 
 ## Boundary
