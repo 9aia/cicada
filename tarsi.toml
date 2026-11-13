@@ -1,0 +1,24 @@
+# cicada release config — org release conventions inlined (ADR-0004/0005)
+# so repos don't depend on an installed profile pack. Tag-only:
+# crates.io is tamias-only and GitHub Releases are unused — after
+# tagging, ship the repo's tamias pack manually
+# (`tamias publish libraries/cicada`).
+#
+# Units default to cargo workspace members; crates carry per-crate
+# versions (no workspace-inherited version), so units bump
+# independently.
+
+[release]
+styleguide = "keep-a-changelog"
+changelog_path = "CHANGELOG.md"
+diff_exclude = ["docs/**", "project/**", "*.md", ".github/**"]
+tag_format = "{unit}-v{version}"
+
+[release.unit_overrides.xtask]
+skip = true
+
+[publish.crates]
+enabled = false   # ADR-0004: crates.io publishing is tamias-only
+
+[publish.ghreleases]
+enabled = false   # org releases are tag-only; capability stays for opt-in
