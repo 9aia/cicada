@@ -110,4 +110,3 @@ pre-commit runs `cargo fmt --check`, pre-push `cargo xtask check`.
 - `sturn leave` on exit — drops the actor's claims.
 
 <!-- /sturn:agent-awareness -->
-
