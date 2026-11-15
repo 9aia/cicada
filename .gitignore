@@ -17,6 +17,9 @@ lcov.info
 # myco worktree mount point (created by `myco init`)
 project/
 
+# vitepress docs worktree (orphan `docs` branch)
+docs/
+
 # tamias pack driver payload — build artifact (`cargo xtask pack`)
 /libraries/cicada/drivers/
 
