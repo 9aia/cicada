@@ -242,47 +242,24 @@ Desired and remote recurrence are compared **semantically**, not as strings.
 
 ## Project layout
 
-```
-crates/
-  cicada-core/       domain + application + ports (pure, the reusable gem)
-  cicada-schema/     serde schema + DSL parser (YAML -> domain)
-  cicada-state/      JsonFileStateStore (GCS/S3 later via the same port)
-  cicada-google/     CalendarProvider + AuthProvider impls
-  cicada-cli/        `cicada` engine lib (no bin — the command is the
-                     libraries/cicada tamias pack's bins[] shim);
-                     wires adapters into core use cases
-  cicada-driver/     tamias-driver-cicada — `type: cicada` content driver +
-                     pavo engine-ops driver (`ops`/`serve`/`run`/`cli`;
-                     `cli` is the bins[] shim passthrough, `mcp`
-                     the ops→tools agent surface)
-  cicada-testkit/    fakes, conformance suites, golden fixtures
-xtask/               cargo xtask check|test|pack|install|coverage
-```
+Ports-and-adapters Rust workspace — `cicada-core` is pure domain;
+adapters (`-schema`, `-state`, `-google`, `-shell`) plug in behind its
+port traits; `cicada-cli`/`cicada-driver` are thin shells. The full
+crate map is generated on the docs site
+([architecture](https://9aia.com/cicada/explanation/architecture)) and
+the dev map lives in [AGENTS.md](AGENTS.md).
 
 ## Status
 
-v0.1 feature-complete. Everything works end-to-end against the
-file-backed `fake` provider (`--provider fake`, the default):
-`init` → `validate` → `plan` → `apply` → `drift`/`refresh` →
-`range`/`show` → `fmt`/`list`, plus `tamias-driver-cicada mcp` serving the
-same use cases over stdio; `apply --plan-digest` is the
-confirmation-gated write path.
-
-Google Calendar is implemented (auth: service-account JWT, OAuth
-installed app, static token; Calendar API v3 + Meet; etag
-conditional writes; `sendUpdates`) and exercised by HTTP-fixture
-tests — live runs are credential-gated:
-
-```sh
-cicada provider add google                          # OAuth loopback/paste flow
-cicada provider add google --service-account key.json
-cicada plan --provider google
-```
-
-Env credentials (`GOOGLE_APPLICATION_CREDENTIALS`,
-`CICADA_GOOGLE_CLIENT_ID`/`_SECRET` + refresh token,
-`CICADA_GOOGLE_ACCESS_TOKEN`) also work and take precedence. Teams,
-CalDAV, and others follow via the same `CalendarProvider` port.
+v0.1 — the full lifecycle works end-to-end against the file-backed
+`fake` provider (the default): `init` → `validate` → `plan` →
+`apply` → `drift`/`refresh` → `range`/`show` → `fmt`/`list`, plus
+`tamias-driver-cicada mcp` over the same core. `apply
+--plan-digest` is the confirmation-gated write path. The Google
+Calendar provider (service-account JWT, OAuth, static token; Calendar
+API v3 + Meet) is implemented and fixture-tested — live runs are
+credential-gated; see the
+[providers reference](https://9aia.com/cicada/reference/providers).
 
 ## Development
 
