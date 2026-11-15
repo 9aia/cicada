@@ -1,0 +1,28 @@
+# cicada — docs/reference generation contract for `cypera`
+# (`cypera gen crate-map|cli`, discovered upward from --repo).
+# Replaces the retired docs/gen-*.py wrappers; schema lives in
+# ../cypera crates/cypera-core/src/repo_config.rs.
+
+[crate_map]
+
+[crate_map.layers]
+"cicada-core" = "domain"
+"cicada-schema" = "adapter"
+"cicada-state" = "adapter"
+"cicada-google" = "adapter"
+"cicada-shell" = "adapter"
+"cicada" = "engine"
+"cicada-cli" = "engine"
+"cicada-driver" = "driver"
+"cicada-testkit" = "testkit"
+"xtask" = "tooling"
+
+[[crate_map.splices]]
+target = "docs/explanation/architecture.md"
+marker = "<!-- crate-map -->"
+
+[cli]
+package = "cicada-driver"
+bin = "tamias-driver-cicada"
+prefix = ["run"]
+out = "docs/reference/cli.md"
