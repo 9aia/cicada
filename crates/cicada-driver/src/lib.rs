@@ -6,7 +6,7 @@
 //! [--config <f>]`): [`verbs`] implements `install` (validate
 //! only), `deploy` (plan-only), `uninstall`/`status` (read-only
 //! reports), `config-schema`, behind the clap front in
-//! [`tamias`]. [`config`] is the operator `--config` YAML model.
+//! `tamias`. [`config`] is the operator `--config` YAML model.
 //!
 //! **pavo view/engine driver**: [`engine_ops`] is the ops manifest
 //! — every bounded `cicada` CLI verb as a `cli.<verb>` wire query,
@@ -143,7 +143,7 @@ pub fn serve() -> i32 {
 
 /// The tamias verb front — `install`/`deploy`/`uninstall`/
 /// `status`/`config-schema` behind their clap parser. `argv`
-/// includes argv[0] (the binary name). Returns the process exit
+/// includes argv\[0\] (the binary name). Returns the process exit
 /// code; clap errors/help exit through clap itself.
 pub fn tamias_run<I, T>(argv: I) -> i32
 where

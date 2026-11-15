@@ -37,7 +37,7 @@ impl SendUpdates {
     /// Parse the `spec.apply.sendUpdates` / `--notify` spellings.
     ///
     /// # Errors
-    /// [`CicadaError::Fatal`] on an unknown value.
+    /// [`CicadaError::Fatal`](crate::CicadaError::Fatal) on an unknown value.
     pub fn parse(s: &str) -> crate::domain::error::Result<Self> {
         match s {
             "none" => Ok(Self::None),

@@ -19,7 +19,7 @@
 //!   create doesn't mint a second Meet link.
 //! - **Pagination:** `events.list` follows `nextPageToken` until
 //!   exhausted.
-//! - **Errors (§8):** see [`classify`] — 429/5xx are `Transient`
+//! - **Errors (§8):** see `classify` — 429/5xx are `Transient`
 //!   with `Retry-After` honored; quota-shaped 403s are `Transient`
 //!   too; other 401/403 → `Auth`; `412` → `Conflict`; the rest is
 //!   `Fatal` with Google's `error.message` when present.

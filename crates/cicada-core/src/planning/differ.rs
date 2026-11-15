@@ -27,7 +27,7 @@ impl EventDiffer {
     /// local id — diff against desired ones directly.
     ///
     /// # Errors
-    /// [`CicadaError::Fatal`] when a time can't be rendered for the
+    /// [`CicadaError::Fatal`](crate::CicadaError::Fatal) when a time can't be rendered for the
     /// diff text (unresolvable zone).
     pub fn diff(&self, desired: &EventBody, actual: &EventBody) -> Result<EventDiff> {
         let mut changes = Vec::new();

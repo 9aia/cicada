@@ -3,19 +3,19 @@
 //!
 //! Implements two ports from `cicada-core`:
 //!
-//! - [`GoogleCalendarProvider`] — [`CalendarProvider`] over the
+//! - [`GoogleCalendarProvider`] — [`CalendarProvider`](cicada_core::ports::CalendarProvider) over the
 //!   Calendar API v3: `events.list/get/insert/patch/delete` +
 //!   `freeBusy.query`, `extendedProperties.private` tagging
 //!   (ADR-0002 §2), etag `If-Match` conditional writes (§4),
 //!   `sendUpdates` (§5), Meet `conferenceData` for
 //!   `conferencing: meet`, and the §8 error taxonomy.
-//! - [`GoogleAuthProvider`] — [`AuthProvider`]: service-account JWT
+//! - [`GoogleAuthProvider`] — [`AuthProvider`](cicada_core::ports::AuthProvider): service-account JWT
 //!   bearer, OAuth installed-app refresh tokens, or a static token;
 //!   resolved from the environment by [`GoogleAuthConfig::from_env`].
 //!
 //! Supporting pieces:
 //!
-//! - [`ReqwestHttp`] — the production [`Http`] impl (rustls). All
+//! - [`ReqwestHttp`] — the production [`Http`](cicada_core::ports::Http) impl (rustls). All
 //!   HTTP in this workspace goes through the `Http` port, so tests
 //!   drive the provider through `cicada_testkit::FixtureHttp` with
 //!   zero network.

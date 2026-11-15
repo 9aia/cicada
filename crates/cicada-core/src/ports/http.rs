@@ -75,7 +75,7 @@ impl HttpRequest {
     /// Set a JSON body and `Content-Type` (builder style).
     ///
     /// # Errors
-    /// [`CicadaError::Fatal`] if `value` can't serialize.
+    /// [`CicadaError::Fatal`](crate::CicadaError::Fatal) if `value` can't serialize.
     pub fn json<T: Serialize>(self, value: &T) -> Result<Self> {
         self.json_bytes(serde_json::to_vec(value))
     }

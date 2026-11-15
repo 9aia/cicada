@@ -89,7 +89,7 @@ impl ZoneId {
     /// Validate `name` against the tz database.
     ///
     /// # Errors
-    /// [`CicadaError::Fatal`] when `name` is not a known IANA zone.
+    /// [`CicadaError::Fatal`](crate::CicadaError::Fatal) when `name` is not a known IANA zone.
     pub fn new(name: impl Into<String>) -> crate::domain::error::Result<Self> {
         let name = name.into();
         jiff::tz::TimeZone::get(&name).map_err(|e| {
