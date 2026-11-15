@@ -81,7 +81,8 @@ pre-commit runs `cargo fmt --check`, pre-push `cargo xtask check`.
 - `project/adrs/0002-reconciliation-contracts.md` — managed boundary,
   remote tagging, safe resume, conflict/notification policy, versioned
   state and plan formats. Read before touching apply semantics.
-- `docs/comparison.md` — competitive landscape.
+- The docs site (`docs` branch → 9aia.com/cicada) carries the
+  competitive landscape (`explanation/landscape.md`).
 
 <!-- myco:agent-awareness -->
 
