@@ -63,16 +63,18 @@ honestly instead of silently dropping fields.
 
 ## Crates
 
-| Crate | Role |
-|---|---|
-| `cicada-core` | domain + application + ports (the reusable gem) |
-| `cicada-schema` | serde schema + YAML DSL parser → domain |
-| `cicada-state` | `JsonFileStateStore` — recorded state + journal |
-| `cicada-google` | `CalendarProvider` + `AuthProvider` impls (Calendar API + Meet) |
-| `cicada-shell` | shared interface plumbing: provider wiring, file resolution, time-bound parsing |
-| `cicada-mcp` | `cicada-mcp` binary — MCP stdio server, transport only |
-| `cicada-cli` | `cicada` binary — verbs wire adapters into use cases |
-| `cicada-testkit` | fakes, conformance suites, golden fixtures |
+<!-- crate-map -->
+| crate | layer | purpose |
+|---|---|---|
+| `cicada-core` | domain | `cicada-core` — pure domain, ports, and planning scaffolding. Layered per ADR-0001: `domain` holds entities and value objects, `application` the use cases, `ports` the seven traits implemented by adap… |
+| `cicada-google` | adapter | `cicada-google` — the Google Calendar provider adapter (ADR-0001 §10 step 6). |
+| `cicada-schema` | adapter | `cicada-schema` — the YAML DSL: Kubernetes-style envelope (`apiVersion: cicada/v1`, `kind:`) parsed into `cicada-core` domain types. Two documents (ADR-0001 §6, ADR-0002 §9): |
+| `cicada-shell` | adapter | `cicada-shell` — the plumbing every user-facing interface shares. `cicada-core` is pure; adapters live in their own crates. |
+| `cicada-state` | adapter | `JsonFileStateStore` — the file-backed `StateStore` adapter (ADR-0002 §7). The state file is YAML in the `cicada/state-v1` shape: |
+| `cicada` | engine | cicada — calendars as code: the engine lib + `cicada` CLI (init/validate/list/plan/apply/refresh/drift/range/show/fmt/provider) |
+| `cicada-driver` | driver | tamias-driver-cicada — pavo engine-ops driver over the `cicada` CLI plus tamias content driver for `type: cicada` packages |
+| `cicada-testkit` | testkit | `cicada-testkit` — reusable fakes and conformance helpers for tests across the workspace. |
+| `xtask` | tooling | xtask — workspace automation: check / test / coverage / pack / install / fmt. |
 
 ## Single write path
 

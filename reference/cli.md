@@ -1,134 +1,242 @@
-# CLI
+# Command-Line Help for `cicada`
 
-`cicada` — calendars as code. Declare calendars in YAML; plan, apply,
-and detect drift against live providers.
+This document contains the help content for the `cicada` command-line program.
 
-**Global behaviour.** Verbs that read desired state take optional file
-arguments; with none, the `cicada.yaml` (or `cicada.yml`) manifest in
-the current directory is discovered and its `calendars:` list used. A
-`kind: Manifest` path passed explicitly expands the same way. All
-verbs exit `0` on success and `1` on failure.
+calendars as code — declare calendars in YAML, reconcile like infrastructure
 
-**Shared flags.** Provider-facing verbs accept:
+**Command Overview:**
 
-| Flag | Default | Meaning |
-|---|---|---|
-| `--provider <fake\|google>` | `fake` | Provider adapter |
-| `--fake-file <path>` | `.cicada/fake-provider.json` beside the manifest | Fake backend file (test/demo) |
-| `--state <path>` | `.cicada/state.yaml`; `$CICADA_STATE` overrides | Recorded-state file |
+* [`cicada`↴](#cicada)
+* [`cicada init`↴](#cicada-init)
+* [`cicada validate`↴](#cicada-validate)
+* [`cicada list`↴](#cicada-list)
+* [`cicada plan`↴](#cicada-plan)
+* [`cicada apply`↴](#cicada-apply)
+* [`cicada refresh`↴](#cicada-refresh)
+* [`cicada drift`↴](#cicada-drift)
+* [`cicada range`↴](#cicada-range)
+* [`cicada show`↴](#cicada-show)
+* [`cicada fmt`↴](#cicada-fmt)
+* [`cicada provider`↴](#cicada-provider)
+* [`cicada provider add`↴](#cicada-provider-add)
 
-## `cicada init [dir]`
+## `cicada`
 
-Scaffold `cicada.yaml`, `calendars/work.yaml`, and `.cicada/` in `dir`
-(default: current directory). Refuses to overwrite existing files.
+calendars as code — declare calendars in YAML, reconcile like infrastructure
 
-| Flag | Meaning |
-|---|---|
-| `--force` | Overwrite existing scaffolded files |
+**Usage:** `cicada [COMMAND]`
 
-## `cicada validate [files…]`
+###### **Commands:**
 
-Schema shape plus domain invariants per file; manifests expand.
-Reports `✓`/`✗` per file with diagnostics, then `N valid, M failed`.
-Exit `1` when any file errors.
+* `init` — Scaffold a cicada.yaml manifest and a starter calendar
+* `validate` — Validate calendar YAML: schema shape plus domain invariants
+* `list` — List the declared calendars: bindings plus declared/recorded event counts
+* `plan` — Diff desired vs recorded vs live into an ordered plan — and issue the `planDigest` `apply --plan-digest` requires
+* `apply` — Reconcile: execute the plan against the provider
+* `refresh` — Pull live state into recorded state
+* `drift` — Show recorded-vs-live drift
+* `range` — Expand events over a time range (local; --provider for live)
+* `show` — Show one event by stable local id
+* `fmt` — Normalize calendar YAML formatting in place
+* `provider` — Manage provider registrations (`provider add google`)
 
-## `cicada plan [files…]`
+###### **Options:**
 
-Diff desired vs recorded vs live into an ordered plan: `create`,
-`update`, `delete`, `replace`, `noop` lines with field-level diffs,
-drift entries, and capability findings. Exit `1` on errors or when
-any plan carries error-severity findings.
+* `-h, --help` — Print help
+* `-V, --version` — Print version
 
-| Flag | Meaning |
-|---|---|
-| `--out <path>` | Write the `cicada/plan-v1` JSON document (array when several calendars planned) |
+## `cicada init`
 
-## `cicada apply [files…]`
+Scaffold a cicada.yaml manifest and a starter calendar
 
-Plan then execute under the state-file advisory lock. Prints the plan,
-prompts `[y/N]` unless `--auto-approve`, then applies ops in order,
-journalling each into recorded state. Exit `1` when any op fails —
-partial applies are honest.
+**Usage:** `cicada init [OPTIONS] [DIR]`
 
-| Flag | Meaning |
-|---|---|
-| `--auto-approve` | Skip the confirmation prompt |
-| `--resume` | Skip ops already journaled as applied (crash recovery) |
-| `--force` | Overwrite out-of-band edits instead of failing on drift conflict |
-| `--notify <none\|externalOnly\|all>` | Attendee-notification override for this run |
+###### **Arguments:**
+
+* `[DIR]` — Directory to scaffold into (default: current directory)
+
+###### **Options:**
+
+* `--force` — Overwrite existing `cicada.yaml` / `calendars/work.yaml`
+* `-h, --help` — Print help
+
+## `cicada validate`
+
+Validate calendar YAML: schema shape plus domain invariants. With no files, discovers the `cicada.yaml` manifest in the current directory and validates every calendar it lists. A `kind: Manifest` file passed explicitly expands the same way.
+
+**Usage:** `cicada validate [FILES]...`
+
+###### **Arguments:**
+
+* `[FILES]...` — Calendar or manifest YAML files. Defaults to the `cicada.yaml` manifest in the current directory
+
+###### **Options:**
+
+* `-h, --help` — Print help (see a summary with '-h')
+
+## `cicada list`
+
+List the declared calendars: bindings plus declared/recorded event counts
+
+**Usage:** `cicada list [OPTIONS] [FILES]...`
+
+###### **Arguments:**
+
+* `[FILES]...` — Calendar or manifest YAML files. Defaults to the `cicada.yaml` manifest in the current directory
+
+###### **Options:**
+
+* `--provider <PROVIDER>` — Provider name used for calendars without `provider:` (fake | google; default fake)
+* `--state <STATE>` — Recorded-state file (default `.cicada/state.yaml`; also `CICADA_STATE`)
+* `-h, --help` — Print help
+
+## `cicada plan`
+
+Diff desired vs recorded vs live into an ordered plan — and issue the `planDigest` `apply --plan-digest` requires
+
+**Usage:** `cicada plan [OPTIONS] [FILES]...`
+
+###### **Arguments:**
+
+* `[FILES]...` — Calendar or manifest YAML files. Defaults to the `cicada.yaml` manifest in the current directory
+
+###### **Options:**
+
+* `--provider <PROVIDER>` — Provider adapter to plan against (fake | google)
+* `--fake-file <FAKE_FILE>` — Fake provider backend file (test/demo only; default `.cicada/fake-provider.json` beside the manifest)
+* `--state <STATE>` — Recorded-state file (default `.cicada/state.yaml` beside the manifest; `CICADA_STATE` also overrides)
+* `--out <OUT>` — Write the plan JSON here (`cicada/plan-v1`); a JSON array when more than one calendar is planned
+* `--notify <NOTIFY>` — Attendee notifications: none | externalOnly | all — must match the choice `apply` uses or the plan digest goes stale
+* `-h, --help` — Print help
+
+## `cicada apply`
+
+Reconcile: execute the plan against the provider. `--plan-digest <sha256:…>` applies only the exact plan a `cicada plan` run previewed — the digest is consumed on use and counts as the confirmation (no prompt).
+
+**Usage:** `cicada apply [OPTIONS] [FILES]...`
+
+###### **Arguments:**
+
+* `[FILES]...` — Calendar or manifest YAML files. Defaults to the `cicada.yaml` manifest in the current directory
+
+###### **Options:**
+
+* `--provider <PROVIDER>` — Provider adapter to apply against (fake | google)
+* `--fake-file <FAKE_FILE>` — Fake provider backend file (test/demo only; default `.cicada/fake-provider.json` beside the manifest)
+* `--state <STATE>` — Recorded-state file (default `.cicada/state.yaml`; also `CICADA_STATE`)
+* `--auto-approve` — Skip the confirmation prompt
+* `--resume` — Resume after a crash — skip already-journaled ops
+* `--force` — Overwrite out-of-band edits instead of failing on drift conflict (ADR-0002 §4)
+* `--notify <NOTIFY>` — Attendee notifications: none | externalOnly | all
+* `--plan-digest <DIGEST>` — Apply only the plan this digest previewed (printed by `cicada plan` as `planDigest sha256:…`). The digest must have been issued and not spent, and the re-planned digest must match — anything changed since preview refuses as stale. Providing it is the confirmation: the prompt is skipped
+* `-h, --help` — Print help (see a summary with '-h')
 
 ## `cicada refresh`
 
-Fold live provider state into recorded state under the lock: update
-changed records, drop records whose live event is gone, report
-cicada-tagged live events as adoption candidates. Writes only local
-state — never the provider.
+Pull live state into recorded state
+
+**Usage:** `cicada refresh [OPTIONS]`
+
+###### **Options:**
+
+* `--provider <PROVIDER>` — Provider adapter to refresh from (fake | google)
+* `--fake-file <FAKE_FILE>` — Fake provider backend file (test/demo only)
+* `--state <STATE>` — Recorded-state file (default `.cicada/state.yaml`; also `CICADA_STATE`)
+* `-h, --help` — Print help
 
 ## `cicada drift`
 
-Recorded-vs-live comparison. Read-only. Prints `missing`/`modified`
-entries per calendar; exit `1` when any drift exists (the CI signal).
+Show recorded-vs-live drift
 
-## `cicada range [files…]`
+**Usage:** `cicada drift [OPTIONS]`
 
-Expand declared events into occurrences over a window. Default window:
-`today` → `+7d`. With `--provider`, lists the live remote calendar
-instead (unmanaged events included).
+###### **Options:**
 
-| Flag | Meaning |
-|---|---|
-| `--from <bound>` | Window start |
-| `--to <bound>` | Window end (exclusive) |
+* `--provider <PROVIDER>` — Provider adapter to check against (fake | google)
+* `--fake-file <FAKE_FILE>` — Fake provider backend file (test/demo only)
+* `--state <STATE>` — Recorded-state file (default `.cicada/state.yaml`; also `CICADA_STATE`)
+* `-h, --help` — Print help
 
-Bounds: `today`, `+Nd`, `+Nw`, `YYYY-MM-DD`, a civil datetime, or an
-RFC 3339 instant — resolved in the calendar's `timeZone`.
+## `cicada range`
 
-## `cicada show <id> [files…]`
+Expand events over a time range (local; --provider for live)
 
-One event by stable local id: fields plus occurrences (default window
-`today` → `+30d`, capped at 20 lines). With `--provider`, resolves the
-live event by its `cicada:id` tag and expands its remote rule.
+**Usage:** `cicada range [OPTIONS] [FILES]...`
 
-| Flag | Meaning |
-|---|---|
-| `--from`, `--to` | Occurrence window (same grammar as `range`) |
+###### **Arguments:**
 
-## `cicada fmt [files…]`
+* `[FILES]...` — Calendar or manifest YAML files. Defaults to the `cicada.yaml` manifest in the current directory
 
-Canonical re-serialisation in place: stable field order, normalised
-scalars, defaults elided. Comments are not preserved.
+###### **Options:**
 
-| Flag | Meaning |
-|---|---|
-| `--check` | Write nothing; exit `1` when any file isn't canonical (CI) |
-| `--sort` | Sort events by stable id instead of preserving file order |
+* `--calendar <CALENDAR>` — Limit to one declared calendar name; default all
+* `--from <FROM>` — Range start (`today`, `+Nd`, a date, or a datetime)
+* `--to <TO>` — Range end (`+7d`, a date, or a datetime)
+* `--provider <PROVIDER>` — Expand the live provider's events instead of local YAML (fake | google)
+* `-h, --help` — Print help
 
-## `cicada provider add google`
+## `cicada show`
 
-Register Google credentials.
+Show one event by stable local id
 
-| Flag | Meaning |
-|---|---|
-| `--service-account <key.json>` | Non-interactive: validate + store a service-account key |
-| `--client-id`, `--client-secret` | OAuth client credentials (else `CICADA_GOOGLE_CLIENT_ID`/`_SECRET`) |
-| `--code` | Authorization code — skips the interactive prompt |
+**Usage:** `cicada show [OPTIONS] <ID> [FILES]...`
 
-OAuth flow: prints a consent URL; a loopback listener on `127.0.0.1`
-captures the code when it can bind, otherwise the code or redirect URL
-is pasted. The refresh token lands at
-`~/.local/state/cicada/secrets/` mode `0600`.
+###### **Arguments:**
 
-## `cicada mcp`
+* `<ID>` — Stable local id of the event
+* `[FILES]...` — Calendar or manifest YAML files. Defaults to the `cicada.yaml` manifest in the current directory
 
-Serve MCP over stdio — same options as the `cicada-mcp` binary:
-`--root`, `--provider`, `--fake-file`, `--state`. See
-[MCP tools](mcp-tools.md).
+###### **Options:**
 
-## Environment variables
+* `--from <FROM>` — Occurrence window start (`today`, `+Nd`, a date, or a datetime). With `--to`, defaults to `today`
+* `--to <TO>` — Occurrence window end (defaults to the window start + 30d)
+* `--provider <PROVIDER>` — Show the live provider's version of the event (found via its `cicada:id` tag) instead of the declared YAML
+* `-h, --help` — Print help
 
-| Variable | Used by |
-|---|---|
-| `CICADA_STATE` | State file path (all provider-facing verbs) |
-| `CICADA_ROOT` | MCP server working root |
-| `CICADA_GOOGLE_*`, `GOOGLE_APPLICATION_CREDENTIALS` | Google auth — see [providers](providers.md) |
-| `CICADA_SECRETS_DIR` | Secrets directory override |
+## `cicada fmt`
+
+Normalize calendar YAML formatting in place
+
+**Usage:** `cicada fmt [OPTIONS] [FILES]...`
+
+###### **Arguments:**
+
+* `[FILES]...` — Files to format; defaults to the manifest's calendars
+
+###### **Options:**
+
+* `--check` — Check only — exit nonzero when a file isn't canonical; writes nothing (CI-friendly)
+* `--sort` — Sort events by stable id instead of preserving file order
+* `-h, --help` — Print help
+
+## `cicada provider`
+
+Manage provider registrations (`provider add google`)
+
+**Usage:** `cicada provider <COMMAND>`
+
+###### **Commands:**
+
+* `add` — Register a provider (OAuth flow / service account)
+
+###### **Options:**
+
+* `-h, --help` — Print help
+
+## `cicada provider add`
+
+Register a provider (OAuth flow / service account)
+
+**Usage:** `cicada provider add [OPTIONS] <NAME>`
+
+###### **Arguments:**
+
+* `<NAME>` — Provider name (`google`)
+
+###### **Options:**
+
+* `--service-account <KEY_JSON>` — Register a service-account key JSON instead of running the OAuth flow (non-interactive)
+* `--client-id <CLIENT_ID>` — OAuth installed-app client id (else `CICADA_GOOGLE_CLIENT_ID`)
+* `--client-secret <CLIENT_SECRET>` — OAuth installed-app client secret (else `CICADA_GOOGLE_CLIENT_SECRET`)
+* `--code <CODE>` — Authorization code — skips the interactive prompt
+* `-h, --help` — Print help
