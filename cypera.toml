@@ -26,3 +26,6 @@ package = "cicada-driver"
 bin = "tamias-driver-cicada"
 prefix = ["run"]
 out = "docs/reference/cli.md"
+
+[check]
+profile = "engine"
