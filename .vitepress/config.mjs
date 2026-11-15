@@ -43,6 +43,8 @@ export default defineConfig({
         text: 'Explanation',
         items: [
           { text: 'Architecture', link: '/explanation/architecture' },
+          { text: 'Concepts', link: '/explanation/concepts' },
+          { text: 'Decisions', link: '/explanation/decisions' },
           { text: 'Plan, apply and drift', link: '/explanation/plan-apply-drift' },
           { text: 'The landscape', link: '/explanation/landscape' },
         ],

@@ -2,7 +2,8 @@
 
 This guide shows you how to authenticate the `google` provider so
 `--provider google` works on `plan`, `apply`, `refresh`, `drift`,
-`range`, `show`, and `cicada mcp`. Two flows exist — pick one.
+`range`, `show`, and `tamias-driver-cicada mcp`. Two flows exist —
+pick one.
 
 ::: warning Live writes are credential-gated
 Everything in the [tutorial](../tutorials/getting-started.md) works

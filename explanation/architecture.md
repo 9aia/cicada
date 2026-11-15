@@ -1,8 +1,8 @@
 # Architecture
 
 cicada is a Rust workspace built on ports-and-adapters (DDD). The
-point of the split: the same reconciliation engine powers the CLI a
-human runs and the MCP server an agent drives — with zero
+point of the split: the same reconciliation engine powers the `cicada`
+CLI a human runs and the MCP tools an agent drives — with zero
 business-logic duplication.
 
 ## Layers
@@ -50,10 +50,12 @@ honestly instead of silently dropping fields.
 
 ## Why a pure core
 
-- **Two interfaces, one engine.** `cicada` and `cicada-mcp` are thin
-  shells that wire adapters into the same use cases. Agents get the
-  identical lifecycle humans get — `plan.apply` calls the same
-  `ApplyPlan` the `apply` verb calls.
+- **Two interfaces, one engine.** `cicada` (the tamias `bins[]`
+  shim over `tamias-driver-cicada cli`) and the driver's `mcp`
+  surface are thin shells that dispatch the same `cicada-core`
+  use cases. Agents get the identical lifecycle humans get — every
+  bounded verb is a `cli.<verb>` op, and `apply --plan-digest`
+  carries the preview→apply gate engine-side.
 - **Testability.** Domain and planning logic run against in-memory
   fakes; the Google adapter is exercised by recorded HTTP fixtures.
   The full lifecycle shipped and passed end-to-end tests before any
@@ -89,3 +91,34 @@ Recurring events are stored as `(local wall time, IANA zone)` and
 materialised to instants at expansion — DST shifts keep a 09:00
 standup at 09:00 local. Bare-UTC storage of recurring times is the
 classic calendar bug and is banned in core.
+
+## Boundaries
+
+Cicada owns the **desired-state lifecycle** — declare, plan, apply,
+drift — and the ports everything crosses. Neighbors own theirs:
+
+- **Providers** (Google Calendar API, future Teams/CalDAV) — remote
+  truth; cicada reads/writes through `CalendarProvider`, never
+  talks HTTP itself.
+- **Secrets** — `token_env`/credential names only; values resolve
+  through env or [cuora](https://9aia.com/cuora/), never config.
+- **Distribution** — the `cicada` command is a tamias `bins[]`
+  pack; `tamias-driver-cicada` is also the `type: cicada` content
+  driver. [tamias](https://9aia.com/tamias/) owns fetch/install.
+- **Orchestration** — campaigns that schedule reconciles are
+  [peregrin](https://9aia.com/peregrin/)'s; cicada exposes bounded
+  ops they can call.
+
+## Where it sits
+
+In the org's layering — **tamias** (package & content manager) →
+**engines** (myco records, kuda code maps, mimus proofs, sepia
+sessions, sturn coordination, hypha substrate, tarsi releases,
+cypera docs, scarab config, peregrin orchestration) → **surfaces**
+(pavo views, MCP fronts, agent harnesses).
+
+Cicada is an **engine** — infrastructure-style reconciliation for
+calendars. Humans drive `cicada` verbs; agents drive the same
+verbs as `cli.*` ops or MCP tools; both land on the identical
+`cicada-core` use cases, with the `planDigest` gate making
+preview→apply explicit on every surface.

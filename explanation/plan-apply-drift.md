@@ -79,8 +79,8 @@ Where the provider supports conditional writes (Google: etag →
 concurrency where available, conflict checking otherwise.
 
 Providers email attendees on writes, so `sendUpdates` is a
-first-class knob (`spec.apply.sendUpdates`, `--notify`, the
-`plan.apply` parameter) defaulting to `externalOnly` — drift repairs
+first-class knob (`spec.apply.sendUpdates`, `--notify`, the `apply`
+tool's `notify` param) defaulting to `externalOnly` — drift repairs
 shouldn't spam the team.
 
 ## Versioned public contracts

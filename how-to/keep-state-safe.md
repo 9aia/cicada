@@ -37,7 +37,7 @@ Multi-user teams should have one canonical copy.
 
 ## Locking
 
-`apply`, `refresh`, and the MCP `state.refresh`/`plan.apply` tools
+`apply`, `refresh`, and the MCP `refresh`/`apply` tools
 take an exclusive advisory `flock` on `state.yaml.lock` for their
 whole run. A concurrent `cicada` process or a long-running MCP server
 cannot interleave writes — a second process simply waits.

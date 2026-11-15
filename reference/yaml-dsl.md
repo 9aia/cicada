@@ -68,7 +68,7 @@ calendar is deferred.
 
 Attendee-notification policy on writes: `none`, `externalOnly`
 (default — drift fixes shouldn't spam the team), or `all`.
-`--notify` and the `plan.apply` tool parameter override per run.
+`--notify` and the `apply` tool's `notify` argument override per run.
 
 ### `spec.events[]`
 

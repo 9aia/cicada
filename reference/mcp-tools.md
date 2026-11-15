@@ -1,124 +1,99 @@
 # MCP tools
 
-`cicada-mcp` (or `cicada mcp`) serves MCP over **stdio**. Each tool
-decodes JSON arguments, runs a `cicada-core` use case, and returns
-human-readable `content` text plus `structuredContent` JSON. Errors
-arrive as tool results (`isError: true`), never protocol errors.
+`tamias-driver-cicada mcp` serves MCP over **stdio** — newline-
+delimited JSON-RPC. The surface is generated: the driver's ops
+manifest (every bounded `cicada` verb as a `cli.<verb>` wire query)
+is rendered as MCP tools by pavo-driver-kit, so **tool names are
+the verb names** and `tools/call` arguments are the verb's params
+verbatim. Errors arrive as tool results (`isError: true`), never
+protocol errors.
 
-## Server options
+There is no `cicada-mcp` binary and no `cicada mcp` verb — both were
+deleted in T-019 when the preview→apply gate moved engine-side
+(`planDigest`, see below).
 
-| Flag / env | Default | Meaning |
+## Server setup
+
+```json
+{
+  "mcpServers": {
+    "cicada": {
+      "command": "tamias-driver-cicada",
+      "args": ["mcp"],
+      "cwd": "/path/to/project"
+    }
+  }
+}
+```
+
+- **cwd** — ops inherit the server process's working directory:
+  `cicada.yaml` discovery, `.cicada/` state, and `CICADA_*` env
+  resolve exactly as for the `cicada` binary. Point `cwd` at the
+  project root, or pass calendar file paths per call.
+- **Per-call params** — `provider` (`fake`|`google`), `fake_file`,
+  `state`, and each verb's own flags map to the same-named tool
+  arguments. `provider.add` is a declared *surface*, never a tool —
+  OAuth needs stdin/browser.
+
+Every tool call re-reads the YAML, the state file, and the provider
+— a long-running server never serves stale data. Window bounds
+(`from`/`to` on `range`) accept `today`, `+Nd`, `+Nw`,
+`YYYY-MM-DD`, civil datetimes, or RFC 3339 instants, resolved in
+each calendar's `timeZone`.
+
+## The tools
+
+Reads are always safe:
+
+| Tool | Params of note | Returns |
 |---|---|---|
-| `--root` | `$CICADA_ROOT`, then cwd | Directory `cicada.yaml` is discovered in |
-| `--provider` | `fake` | `fake` or `google` |
-| `--fake-file` | `.cicada/fake-provider.json` | Fake backend file |
-| `--state` | `.cicada/state.yaml`, `$CICADA_STATE` | Recorded-state file |
+| `list` | `files` | declared calendars + bindings + counts |
+| `range` | `from`, `to`, `live` | expanded occurrences in a window |
+| `show` | event id | one event's detail + occurrences |
+| `drift` | — | recorded vs live mismatches (exit nonzero on drift) |
+| `validate` | `files` | schema + domain-invariant check |
 
-All tools re-read YAML, state, and the provider per call. `from`/`to`
-window bounds accept `today`, `+Nd`, `+Nw`, `YYYY-MM-DD`, civil
-datetimes, or RFC 3339 instants, resolved in each calendar's
-`timeZone`.
+Mutating (all confirmation-gated, see below):
 
-## `cicada.calendar.list` — read-only
-
-Declared calendars with bindings and counts. Takes no arguments.
-
-```json
-{"calendars": [{"name": "work", "timeZone": "UTC", "provider": "fake",
-                "calendarId": "primary", "declaredEvents": 2,
-                "recordedEvents": 2}]}
-```
-
-## `cicada.events.range` — read-only
-
-Expand occurrences in `[from, to)` (defaults `today`, `+7d`).
-
-| Arg | Type | Meaning |
+| Tool | Params of note | Effect |
 |---|---|---|
-| `calendar` | string | Limit to one declared calendar (default: all) |
-| `from`, `to` | string | Window bounds |
-| `live` | boolean | Expand the provider's live events instead of desired YAML |
+| `init` | — | scaffold `cicada.yaml` + starter calendar |
+| `plan` | `notify`, `out` | diff desired/recorded/live → ops + `planDigest` |
+| `apply` | `plan_digest`, `auto_approve`, `resume`, `force`, `notify` | execute a plan |
+| `refresh` | — | fold live into recorded state |
+| `fmt` | `files` | rewrite calendar YAML canonically |
 
-```json
-{"calendars": [{"calendar": "work", "live": false,
-                "occurrences": [ … ]}], "totalOccurrences": 5}
+## The write contract
+
+There is **no `events.create`** — all mutations flow through
+declared YAML → `plan` → `apply` (single write path). This keeps
+every remote event managed and drift meaningful.
+
+`apply` is gated — mutations are never implicit:
+
+1. `plan` prints a `planDigest` (`sha256:…`), persisted beside the
+   state file — issued digests survive process boundaries.
+2. `apply` with `plan_digest` must name an issued, unspent digest;
+   the engine re-plans and refuses if YAML, live, or recorded
+   state changed since the preview. Digests are single-use.
+3. `apply` without `plan_digest` prompts on stdin — under MCP
+   (null stdin) that fails closed and aborts, so agents must use
+   the digest path. `auto_approve` skips both gates and is the
+   caller's explicit choice (CI), never a default.
+
+Typical agent flow:
+
 ```
-
-## `cicada.events.show` — read-only
-
-One event by stable local id (`id`, required), plus occurrences
-(defaults `today`, `+30d`).
-
-```json
-{"calendar": "work", "event": { … }, "occurrences": [ … ]}
-```
-
-## `cicada.state.drift` — read-only
-
-Recorded vs live for every recorded calendar.
-
-```json
-{"calendars": [{"calendar": "work", "calendarId": "primary",
-                "drifted": 1,
-                "drift": [{"kind": "modified", "localId": "standup",
-                           "remoteId": "fake-2", …}]}],
- "totalDrifted": 1}
-```
-
-## `cicada.state.refresh`
-
-Fold live into recorded under the state lock. Writes only local
-state.
-
-```json
-{"calendars": [{"calendar": "work", "unchanged": 1, "updated": ["standup"],
-                "removed": [], "reconciled": [ … ],
-                "adoptionCandidates": []}]}
-```
-
-## `cicada.plan.preview` — read-only
-
-Plan every declared calendar; issue a session `planDigest`. Arg:
-`notify` (`none`|`externalOnly`|`all`) — must match on apply or the
-digest goes stale.
-
-```json
-{"planDigest": "sha256:…", "hasErrors": false, "remoteOps": 2,
- "plans": [ /* cicada/plan-v1 documents */ ]}
-```
-
-## `cicada.plan.apply` — gated write
-
-Execute a previewed plan under the state lock.
-
-| Arg | Type | Required | Meaning |
-|---|---|---|---|
-| `planDigest` | string | yes | Digest from `plan.preview` this session |
-| `confirm` | boolean | yes | Must be `true` — explicit approval |
-| `force` | boolean | no | Overwrite out-of-band edits |
-| `resume` | boolean | no | Skip already-journaled ops |
-| `notify` | enum | no | Notification override — must match the preview's |
-
-Gates, in order: `confirm: true` → digest issued by `plan.preview` in
-this session → server re-plans under the lock and re-derives the
-digest; a stale digest refuses. Digests are single-use.
-
-```json
-{"calendars": [{"calendar": "work", "applied": 2, "skipped": 0,
-                "failed": 0, "outcomes": [ … ]}],
- "digest": "sha256:…"}
+list                 → see declared calendars
+range {from, to}     → find a gap
+(edit calendars/*.yaml) → declare the event
+plan                 → read planDigest + the diff, show the user
+apply {plan_digest}  → user approved
 ```
 
 ## Errors
 
-Every error carries its [taxonomy](errors.md) class:
-
-```json
-{"error": {"kind": "fatal|conflict|auth|transient", "message": "…"}}
-```
-
-## The write contract
-
-There is **no `events.create`** — all mutations flow through declared
-YAML + `plan.preview` + `plan.apply` (single write path). This keeps
-every remote event managed and drift meaningful.
+Every error carries its [taxonomy](errors.md) class — `transient`
+(retry), `conflict` (refresh + re-plan), `auth` (surface the token
+flow), `fatal` (fix the input) — so the agent knows whether to
+retry or ask a human.

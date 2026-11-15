@@ -12,18 +12,27 @@ You will need Rust (`cargo`) installed.
 
 ## Install cicada
 
-Clone the repository and run the install task:
+The `cicada` command ships as a [tamias](https://9aia.com/tamias/)
+pack (`libraries/cicada` — `bins[]` shim over
+`tamias-driver-cicada`). With `tamias` installed:
+
+```bash
+tamias install 9aia:cicada@0.1.0          # org registry (needs TAMIAS_REGISTRY_TOKEN)
+```
+
+Or from a checkout:
 
 ```bash
 git clone https://github.com/9aia/cicada.git
 cd cicada
-cargo xtask install
+cargo xtask pack                                   # stage the driver payload
+cargo xtask install                               # tamias-driver-cicada → ~/.local/bin
+tamias install --allow-drivers ./libraries/cicada # deploy the `cicada` shim
 ```
 
-This release-builds two binaries into `~/.local/bin`:
-
-- `cicada` — the CLI
-- `cicada-mcp` — the MCP server for agents (you will not need it today)
+`cargo xtask install` alone gives you the driver binaries (engine
+ops + the `mcp` surface agents use) — the `cicada` command itself
+comes from the pack step.
 
 Check the install:
 
