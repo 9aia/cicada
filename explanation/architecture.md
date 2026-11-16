@@ -97,13 +97,13 @@ See [Boundaries](boundaries.md) for owns / doesn't-own.
 ## Where it sits
 
 In the org's layering — **delivery** (tamias distribution, scarab
-config/templates, tarsi releases, bupha CI) → **memory** (myco
-records, kuda code maps, sturn coordination, hypha substrate) →
-**process** (cuora secrets, mimus proofs, **cicada** schedules,
-lasius workspace, sepia sessions) → **agency** (peregrin campaigns,
-pavo views, MCP fronts, agent harnesses).
+config/templates, tarsi releases, bupha CI, hypha entity sync) →
+**memory** (myco records, kuda code maps) → **process** (sturn
+coordination, cuora secrets, mimus proofs, **cicada** schedules,
+lasius workspace, sepia sessions, peregrin campaigns) →
+**interface** (pavo views, MCP fronts).
 
-Cicada is a **process-layer engine** — infrastructure-style
+Cicada is a **process-layer organism** — infrastructure-style
 reconciliation for calendars. Humans drive `cicada` verbs; agents drive the same
 verbs as `cli.*` ops or MCP tools; both land on the identical
 `cicada-core` use cases, with the `planDigest` gate making
