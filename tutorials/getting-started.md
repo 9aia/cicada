@@ -175,8 +175,11 @@ equivalent of a colleague dragging the meeting in the Google Calendar
 UI. With the fake provider, that means editing its database file.
 
 Open `.cicada/fake-provider.json`, find the event whose `remoteId` is
-`fake-2`, and change its `summary` to `"Daily Standup (moved!)"`.
-Save, then:
+`fake-2`, and change its `summary` to `"Daily Standup (moved!)"` —
+then bump its `"etag"` to a value it hasn't had (e.g. `"etag-99"`).
+A real provider bumps the etag on every edit; cicada treats a
+matching etag as authoritative "nothing changed", so the body edit
+alone isn't enough. Save, then:
 
 ```bash
 cicada drift
