@@ -5,6 +5,7 @@ export default defineConfig({
   description: 'Calendars as code — declare calendars in YAML, plan/apply/drift like infrastructure.',
   base: '/cicada/',
   themeConfig: {
+    search: { provider: 'local' },
     nav: [
       { text: '9aia', link: 'https://9aia.com', target: '_blank' },
       { text: 'Tutorials', link: '/tutorials/getting-started' },
