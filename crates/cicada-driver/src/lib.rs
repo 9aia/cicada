@@ -123,11 +123,14 @@ pub fn dispatch(req: &Request) -> Response {
             }
             Response::err(format!("unknown query: {query}"))
         }
-        // `submit`/`jobs`/`notifications` — this driver claims
-        // neither forms nor feeds; cicada mutations go through
+        // `submit`/`invoke`/`jobs`/`notifications` — this driver claims
+        // neither forms, actions, nor feeds; cicada mutations go through
         // `cli.<verb>`/`run`, never `submit`.
-        Request::Submit { .. } | Request::Jobs | Request::Notifications => {
-            Response::err("tamias-driver-cicada implements no submit/jobs/notifications ops")
+        Request::Submit { .. }
+        | Request::Invoke { .. }
+        | Request::Jobs
+        | Request::Notifications => {
+            Response::err("tamias-driver-cicada implements no submit/invoke/jobs/notifications ops")
         }
     }
 }
