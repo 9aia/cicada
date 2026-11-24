@@ -30,7 +30,7 @@
 # `config-schema`). Installing this pack does not deploy a
 # calendar.
 name: cicada
-version: "0.1.0"
+version: "0.2.0"
 type: files
 description: >-
   Calendars as code — declare calendars in YAML, plan/apply/drift
