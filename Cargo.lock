@@ -173,7 +173,7 @@ dependencies = [
 
 [[package]]
 name = "cicada"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cicada-core",
  "cicada-google",
@@ -193,7 +193,7 @@ dependencies = [
 
 [[package]]
 name = "cicada-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "jiff",
@@ -206,7 +206,7 @@ dependencies = [
 
 [[package]]
 name = "cicada-driver"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cicada",
  "cicada-core",
@@ -226,7 +226,7 @@ dependencies = [
 
 [[package]]
 name = "cicada-google"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "cicada-core",
@@ -244,7 +244,7 @@ dependencies = [
 
 [[package]]
 name = "cicada-schema"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cicada-core",
  "jiff",
@@ -256,7 +256,7 @@ dependencies = [
 
 [[package]]
 name = "cicada-shell"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "cicada-core",
@@ -270,7 +270,7 @@ dependencies = [
 
 [[package]]
 name = "cicada-state"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "cicada-core",
@@ -283,7 +283,7 @@ dependencies = [
 
 [[package]]
 name = "cicada-testkit"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "cicada-core",
